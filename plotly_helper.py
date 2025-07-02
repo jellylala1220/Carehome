@@ -212,3 +212,41 @@ def show_plotly_in_webview(fig):
     html = pio.to_html(fig, full_html=True, include_plotlyjs='cdn')
     webview.create_window('Analysis Chart', html=html)
     webview.start()
+    
+import plotly.graph_objects as go
+score_list = sorted(result_df['NEWS2 Score'].unique())
+selected_score = st.selectbox("Select NEWS2 Score", score_list)
+
+df_score = result_df[result_df['NEWS2 Score'] == selected_score].sort_values('Month')
+fig = go.Figure()
+fig.add_trace(go.Scatter(x=df_score['Month'], y=df_score['Actual'], mode='lines+markers', name='Actual'))
+# 预测点+区间
+pred_row = df_score.iloc[-1]
+fig.add_trace(go.Scatter(
+    x=[df_score['Month'].iloc[-1]],
+    y=[pred_row['Predicted Mean']],
+    mode='markers',
+    marker=dict(size=10, color='blue'),
+    name='Prediction'
+))
+fig.add_trace(go.Scatter(
+    x=[df_score['Month'].iloc[-1], df_score['Month'].iloc[-1]],
+    y=[pred_row['95% Lower'], pred_row['95% Upper']],
+    mode='lines',
+    line=dict(color='blue', width=4),
+    name='95% CI'
+))
+fig.add_trace(go.Scatter(
+    x=[df_score['Month'].iloc[-1]],
+    y=[pred_row['Actual']],
+    mode='markers',
+    marker=dict(size=15, color='red', symbol='star'),
+    name='Actual (target)'
+))
+fig.update_layout(
+    title=f"NEWS2 Score {selected_score} Time Series & Next Month Prediction",
+    xaxis_title="Month",
+    yaxis_title="Count",
+    legend_title="Legend"
+)
+st.plotly_chart(fig, use_container_width=True, key=f"score-timeseries-{selected_score}")
