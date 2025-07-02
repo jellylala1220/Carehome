@@ -480,3 +480,30 @@ def process_health_insights(df, care_home_id, period):
         'judgement_accuracy': acc,
         'param_trigger': param_trigger_df
     }
+
+import matplotlib.pyplot as plt
+
+def plot_scorewise_time_series(result_df, save_dir="scorewise_prediction_figs"):
+    import os
+    os.makedirs(save_dir, exist_ok=True)
+    for score in sorted(result_df['NEWS2 Score'].unique()):
+        df_score = result_df[result_df['NEWS2 Score'] == score].sort_values('Month')
+        plt.figure(figsize=(10, 5))
+        plt.plot(df_score['Month'], df_score['Actual'], marker='o', color='gray', label='Actual')
+        # 最后一个月的预测及区间
+        pred_row = df_score.iloc[-1]
+        pred_mean = pred_row['Predicted Mean']
+        pred_lower = pred_row['95% Lower']
+        pred_upper = pred_row['95% Upper']
+        plt.errorbar(df_score['Month'].iloc[-1], pred_mean,
+                     yerr=[[pred_mean - pred_lower], [pred_upper - pred_mean]],
+                     fmt='o', color='blue', capsize=6, label='Prediction (95% CI)')
+        plt.scatter(df_score['Month'].iloc[-1], pred_row['Actual'], color='red', marker='*', s=120, label='Actual (target)')
+        plt.title(f"NEWS2 Score {score} Time Series & Next Month Prediction")
+        plt.xlabel("Month")
+        plt.ylabel("Count")
+        plt.legend()
+        plt.tight_layout()
+        plt.savefig(f"{save_dir}/NEWS2_{score}_time_series_prediction.png", dpi=150)
+        plt.close()
+
