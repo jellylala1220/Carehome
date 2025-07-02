@@ -112,30 +112,48 @@ if main_data_file and st.session_state['go_analysis']:
                st.warning("This care home does not have enough observations (>100 required) to run prediction.")
                st.stop()
             else:
-                from data_processor import predict_next_month_news2
-                result_df, next_month = predict_next_month_news2(care_home_df, window=2)
-                if result_df.empty or next_month is None:
-                    st.warning("Not enough months of data to make prediction.")
-                    st.stop()
-                else:
-                    st.markdown(f"**Prediction for month:** {next_month}")
-                    st.dataframe(result_df.style.format({'Predicted Mean': '{:.2f}', '95% Lower': '{:.2f}', '95% Upper': '{:.2f}'}))
-                    # 简单error bar可视化
-                    import matplotlib.pyplot as plt
-                    plt.figure(figsize=(8, 4))
-                    x = result_df['NEWS2 Score']
-                    y = result_df['Predicted Mean']
-                    err_low = y - result_df['95% Lower']
-                    err_up = result_df['95% Upper'] - y
-                    plt.errorbar(x, y, yerr=[err_low, err_up], fmt='o', capsize=6, label='Prediction')
-                    plt.scatter(x, result_df['Actual'], color='red', marker='*', s=100, label='Actual (Last Month)')
-                    plt.xlabel("NEWS2 Score")
-                    plt.ylabel("Monthly Count")
-                    plt.legend()
-                    plt.title("NEWS2 Score Prediction for Next Month")
-                    st.pyplot(plt)
-                    plt.close()
-                    st.download_button("Download Prediction Results", result_df.to_csv(index=False), file_name="prediction_results.csv")
+                result_df, next_month = predict_next_month_news2(care_home_df)
+                st.markdown(f"**Prediction for month:** {next_month}")
+                st.dataframe(result_df.style.format({'Predicted Mean': '{:.2f}', '95% Lower': '{:.2f}', '95% Upper': '{:.2f}'}))
+        
+        # ==== 总预测error bar图 ====
+                import matplotlib.pyplot as plt
+                plt.figure(figsize=(8,4))
+                x = result_df['NEWS2 Score']
+                y = result_df['Predicted Mean']
+                err_low = y - result_df['95% Lower']
+                err_up = result_df['95% Upper'] - y
+                plt.errorbar(x, y, yerr=[err_low, err_up], fmt='o', capsize=6, label='Prediction')
+                plt.scatter(x, result_df['Actual'], color='red', marker='*', s=100, label='Actual (Last Month)')
+                plt.xlabel("NEWS2 Score")
+                plt.ylabel("Monthly Count")
+                plt.legend()
+                plt.title("NEWS2 Score Prediction for Next Month")
+                st.pyplot(plt)
+                plt.close()
+                st.download_button("Download Prediction Results", result_df.to_csv(index=False), file_name="prediction_results.csv")
+
+        # ==== 下面这段就是每个NEWS2分数单独的时间序列+预测图 ====
+                score_list = sorted(result_df['NEWS2 Score'].unique())
+                selected_score = st.selectbox("Select NEWS2 Score to view time series", score_list)
+                df_score = result_df[result_df['NEWS2 Score'] == selected_score].sort_values('Month')
+                fig, ax = plt.subplots(figsize=(8, 4))
+        # 如果df_score包含多个月（比如你结构支持多月），可画整条历史曲线，否则就画最后一个月预测和实际
+                ax.plot(df_score['Month'], df_score['Actual'], marker='o', color='gray', label='Actual')
+                pred_row = df_score.iloc[-1]
+                pred_mean = pred_row['Predicted Mean']
+                pred_lower = pred_row['95% Lower']
+                pred_upper = pred_row['95% Upper']
+                ax.errorbar(df_score['Month'].iloc[-1], pred_mean,
+                    yerr=[[pred_mean - pred_lower], [pred_upper - pred_mean]],
+                    fmt='o', color='blue', capsize=6, label='Prediction (95% CI)')
+                ax.scatter(df_score['Month'].iloc[-1], pred_row['Actual'], color='red', marker='*', s=120, label='Actual (target)')
+                ax.set_title(f"NEWS2 Score {selected_score} Time Series & Next Month Prediction")
+                ax.set_xlabel("Month")
+                ax.set_ylabel("Count")
+                ax.legend()
+                st.pyplot(fig)
+                plt.close()
 
 
 
