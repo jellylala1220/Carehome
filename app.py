@@ -137,21 +137,19 @@ if main_data_file and st.session_state['go_analysis']:
         # ==== 下面这段就是每个NEWS2分数单独的时间序列+预测图 ====
                 score_list = sorted(result_df['NEWS2 Score'].unique())
                 selected_score = st.selectbox("Select NEWS2 Score to view time series", score_list)
-                df_score = result_df[result_df['NEWS2 Score'] == selected_score].sort_values('Month')
+                df_score = result_df[result_df['NEWS2 Score'] == selected_score]
+
                 fig, ax = plt.subplots(figsize=(8, 4))
-        # 如果df_score包含多个月（比如你结构支持多月），可画整条历史曲线，否则就画最后一个月预测和实际
-                ax.plot(df_score['Month'], df_score['Actual'], marker='o', color='gray', label='Actual')
-                pred_row = df_score.iloc[-1]
-                pred_mean = pred_row['Predicted Mean']
-                pred_lower = pred_row['95% Lower']
-                pred_upper = pred_row['95% Upper']
-                ax.errorbar(df_score['Month'].iloc[-1], pred_mean,
-                    yerr=[[pred_mean - pred_lower], [pred_upper - pred_mean]],
-                    fmt='o', color='blue', capsize=6, label='Prediction (95% CI)')
-                ax.scatter(df_score['Month'].iloc[-1], pred_row['Actual'], color='red', marker='*', s=120, label='Actual (target)')
-                ax.set_title(f"NEWS2 Score {selected_score} Time Series & Next Month Prediction")
-                ax.set_xlabel("Month")
-                ax.set_ylabel("Count")
+                pred_row = df_score.iloc[0]
+                import matplotlib.pyplot as plt
+                fig, ax = plt.subplots(figsize=(6, 3))
+                ax.bar(['Actual'], [pred_row['Actual']], color='gray', label='Actual')
+                ax.bar(['Prediction'], [pred_row['Predicted Mean']],
+                       yerr=[[pred_row['Predicted Mean'] - pred_row['95% Lower']],
+                     [pred_row['95% Upper'] - pred_row['Predicted Mean']]],
+                       color='blue', alpha=0.6, capsize=6, label='Prediction (95% CI)')
+                ax.set_title(f"NEWS2 Score {selected_score} Prediction (Next Month)")
+                ax.set_ylabel("Monthly Count")
                 ax.legend()
                 st.pyplot(fig)
                 plt.close()
