@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+from data_processor import predict_next_month_news2
 from data_processor import (
     get_care_home_list, get_care_home_info, 
     process_usage_data, process_health_insights,
