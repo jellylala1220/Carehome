@@ -1,5 +1,6 @@
 import pandas as pd
 import numpy as np
+import pymc as pm
 from datetime import datetime
 import plotly.graph_objects as go
 import plotly.express as px
@@ -332,6 +333,49 @@ def plot_high_score_params(hi_data, period):
         yaxis=dict(range=[0, 100], tickformat='.0f')
     )
     return fig
+import pymc as pm
+
+def predict_next_month_news2(df_carehome, window=2, sigma=0.5):
+    # df_carehome: 某个care home的全部观测df
+    if df_carehome.empty or 'NEWS2 score' not in df_carehome.columns or 'Date/Time' not in df_carehome.columns:
+        return pd.DataFrame(), None
+
+    df_carehome = df_carehome.copy()
+    df_carehome['Date/Time'] = pd.to_datetime(df_carehome['Date/Time'])
+    df_carehome['Month'] = df_carehome['Date/Time'].dt.to_period('M')
+    monthly_counts = df_carehome.groupby(['Month', 'NEWS2 score']).size().unstack(fill_value=0)
+    months = monthly_counts.index.astype(str)
+    if len(monthly_counts) < window + 1:
+        return pd.DataFrame(), None
+    target_month = months[-1]
+    moving_avg_months = months[-window:]
+    moving_avg = monthly_counts.loc[moving_avg_months].mean()
+    # 预测"下一个月"
+    next_month = (pd.Period(target_month) + 1).strftime('%Y-%m')
+    score_list = monthly_counts.columns.tolist()
+    results = []
+    for score in score_list:
+        y = monthly_counts[score].values[-window:]
+        prior_mean = moving_avg[score]
+        prior_logmu = np.log(prior_mean + 1e-5)
+        with pm.Model() as model:
+            lam_pred = pm.Lognormal("lam_pred", mu=prior_logmu, sigma=sigma)
+            obs = pm.Poisson("obs", mu=lam_pred, observed=y)
+            trace = pm.sample(600, tune=300, target_accept=0.95, progressbar=False)
+        lam_samples = trace.posterior["lam_pred"].values.flatten()
+        pred_counts = np.random.poisson(lam_samples)
+        pred_mean = np.mean(pred_counts)
+        pred_lower = np.percentile(pred_counts, 2.5)
+        pred_upper = np.percentile(pred_counts, 97.5)
+        results.append({
+            'NEWS2 Score': score,
+            'Predicted Mean': pred_mean,
+            '95% Lower': pred_lower,
+            '95% Upper': pred_upper,
+            'Actual': monthly_counts[score].values[-1]
+        })
+    result_df = pd.DataFrame(results)
+    return result_df, next_month
 
 def get_care_home_list(df):
     return sorted(df['Care Home ID'].dropna().unique())
