@@ -11,5 +11,8 @@ kaleido>=0.2.1        # 支持Plotly静态图片导出
 # Web前端
 streamlit>=1.22.0
 
+# 贝叶斯预测核心
+pymc>=5.0.0
+
 # 可选：如有用到scikit-learn（机器学习/分组统计）
 scikit-learn>=1.0.0
