@@ -80,7 +80,7 @@ if main_data_file and st.session_state['go_analysis']:
             st.markdown(f"**Number of Observations:** {care_home_info.get('obs_count', 'N/A')}")
             st.markdown(f"**Data Time Range:** {care_home_info.get('date_range', 'N/A')}")
         
-        tab1, tab2 = st.tabs(["Usage Analysis", "Health Insights"])
+        tab1, tab2, tab3 = st.tabs(["Usage Analysis", "Health Insights", "Prediction"])
         
         with tab1:
             st.header("Usage Analysis")
@@ -102,6 +102,43 @@ if main_data_file and st.session_state['go_analysis']:
             st.plotly_chart(plot_concern_prop(hi_data, period2), use_container_width=True)
             st.plotly_chart(plot_judgement_accuracy(hi_data, period2), use_container_width=True)
             st.plotly_chart(plot_high_score_params(hi_data, period2), use_container_width=True)
+        
+        with tab3:
+            st.header("Prediction (Next Month, Bayesian Poisson, 2-month Window)")
+        #  取当前care home所有观测
+
+            care_home_df = df[df['Care Home ID'] == care_home].copy()  # ID比Name稳妥
+            if len(care_home_df) <= 100:
+               st.warning("This care home does not have enough observations (>100 required) to run prediction.")
+               st.stop()
+            else:
+                from data_processor import predict_next_month_news2
+                result_df, next_month = predict_next_month_news2(care_home_df, window=2)
+                if result_df.empty or next_month is None:
+                    st.warning("Not enough months of data to make prediction.")
+                    st.stop()
+                else:
+                    st.markdown(f"**Prediction for month:** {next_month}")
+                    st.dataframe(result_df.style.format({'Predicted Mean': '{:.2f}', '95% Lower': '{:.2f}', '95% Upper': '{:.2f}'}))
+                    # 简单error bar可视化
+                    import matplotlib.pyplot as plt
+                    plt.figure(figsize=(8, 4))
+                    x = result_df['NEWS2 Score']
+                    y = result_df['Predicted Mean']
+                    err_low = y - result_df['95% Lower']
+                    err_up = result_df['95% Upper'] - y
+                    plt.errorbar(x, y, yerr=[err_low, err_up], fmt='o', capsize=6, label='Prediction')
+                    plt.scatter(x, result_df['Actual'], color='red', marker='*', s=100, label='Actual (Last Month)')
+                    plt.xlabel("NEWS2 Score")
+                    plt.ylabel("Monthly Count")
+                    plt.legend()
+                    plt.title("NEWS2 Score Prediction for Next Month")
+                    st.pyplot(plt)
+                    plt.close()
+                    st.download_button("Download Prediction Results", result_df.to_csv(index=False), file_name="prediction_results.csv")
+
+
+
     else:
         st.info("Regional Analysis is not implemented yet. Please select Carehome Level Analysis.")
 elif not main_data_file:
