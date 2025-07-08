@@ -453,6 +453,45 @@ def calculate_benchmark_data(df):
 
     return final_benchmark_df.sort_values(by='Rank').reset_index(drop=True)
 
+def get_monthly_regional_benchmark_data(df):
+    """
+    Prepares a monthly, per-care-home dataframe for regional analysis.
+    This function calculates 'Usage per Bed' and assigns a benchmark 'Group'
+    for each care home for each month.
+    """
+    if df is None or df.empty or 'Region' not in df.columns or 'No of Beds' not in df.columns:
+        return pd.DataFrame()
+
+    df_copy = df.copy()
+    df_copy['Date/Time'] = pd.to_datetime(df_copy['Date/Time'])
+    df_copy['Month'] = df_copy['Date/Time'].dt.strftime('%Y-%m')
+
+    ch_info = df_copy.drop_duplicates(subset=['Care Home ID'])[['Care Home ID', 'No of Beds', 'Region']]
+
+    monthly_counts = df_copy.groupby(['Care Home ID', 'Care Home Name', 'Month']).size().reset_index(name='Monthly Observations')
+
+    monthly_df = pd.merge(monthly_counts, ch_info, on='Care Home ID')
+    
+    monthly_df = monthly_df[monthly_df['No of Beds'] > 0]
+    if monthly_df.empty:
+        return pd.DataFrame()
+
+    monthly_df['Usage per Bed'] = monthly_df['Monthly Observations'] / monthly_df['No of Beds']
+    
+    quartiles = monthly_df.groupby('Month')['Usage per Bed'].quantile([0.25, 0.75]).unstack()
+    quartiles.columns = ['Q1', 'Q3']
+    
+    monthly_df = pd.merge(monthly_df, quartiles, on='Month', how='left')
+
+    conditions = [
+        monthly_df['Usage per Bed'] >= monthly_df['Q3'],
+        monthly_df['Usage per Bed'] <= monthly_df['Q1']
+    ]
+    choices = ['High', 'Low']
+    monthly_df['Group'] = np.select(conditions, choices, default='Medium')
+
+    return monthly_df
+
 def geocode_uk_postcodes(df, postcode_column='Post Code'):
     """
     Generates 'Latitude' and 'Longitude' from a UK postcode column if they don't exist

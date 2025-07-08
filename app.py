@@ -8,7 +8,8 @@ from data_processor_simple import (
     plot_judgement_accuracy, plot_high_score_params,
     predict_next_month_bayesian,
     calculate_benchmark_data,
-    geocode_uk_postcodes
+    geocode_uk_postcodes,
+    get_monthly_regional_benchmark_data
 )
 import plotly.graph_objects as go
 import plotly.express as px
@@ -27,7 +28,8 @@ with st.sidebar:
             "Care Home Analysis",
             "Batch Prediction", 
             "Prediction Visualization",
-            "Benchmark Grouping"
+            "Benchmark Grouping",
+            "Regional Analysis"
         ],
         # 可选：为每个按钮添加图标
         icons=[
@@ -35,7 +37,8 @@ with st.sidebar:
             "house", 
             "cpu", 
             "graph-up-arrow", 
-            "bar-chart-line"
+            "bar-chart-line",
+            "globe-americas"
         ],
         menu_icon="cast",  # 菜单图标
         default_index=0,  # 默认选中的按钮
@@ -176,7 +179,7 @@ elif step_title == "Care Home Analysis":
                     st.plotly_chart(plot_coverage(coverage_df), use_container_width=True, key="coverage")
                 else:
                     st.info("Coverage % is only displayed in Monthly mode.")
-            
+        
             with tab2:
                 st.header("Health Insights (Based on NEWS2)")
                 period2 = st.selectbox("Time Granularity (Health Insights)", ["Daily", "Weekly", "Monthly", "Yearly"], index=2, key="health_period")
@@ -528,3 +531,82 @@ elif step_title == "Benchmark Grouping":
                 file_name="care_home_pi_ranking.csv",
                 mime="text/csv",
             )
+
+# Step 6: Regional Analysis
+elif step_title == "Regional Analysis":
+    st.title("Care Home Analysis Dashboard")
+    st.header("Step 6: Regional Analysis")
+
+    if st.session_state['df'] is None:
+        st.warning("Please upload data in Step 1 to begin this analysis.")
+    else:
+        df = st.session_state['df']
+        
+        if 'Region' not in df.columns or 'No of Beds' not in df.columns:
+            st.error("Source data must contain 'Region' and 'No of Beds' columns for this analysis.")
+        else:
+            monthly_df = get_monthly_regional_benchmark_data(df)
+
+            if monthly_df.empty:
+                st.info("Not enough data to generate regional analysis.")
+            else:
+                sorted_months = sorted(monthly_df['Month'].unique())
+
+                st.subheader("A. Monthly Usage per Bed by Region")
+                st.markdown("This boxplot shows the distribution of 'average usage per bed' across all care homes within each region, for each month.")
+                fig_box = px.box(
+                    monthly_df,
+                    x='Month', y='Usage per Bed', color='Region',
+                    category_orders={'Month': sorted_months},
+                    labels={'Usage per Bed': 'Average Usage per Bed', 'Month': 'Month', 'Region': 'Region'},
+                    title='Distribution of Monthly Usage per Bed by Region',
+                    points='all'
+                )
+                st.plotly_chart(fig_box, use_container_width=True)
+
+                st.markdown("---")
+
+                st.subheader("B. Regional Benchmark Grouping Percentage")
+                st.markdown("This chart shows the percentage of care homes in each benchmark group (High/Medium/Low) for each region, on a monthly basis.")
+
+                summary = monthly_df.groupby(['Month', 'Region', 'Group'])['Care Home ID'].nunique().reset_index()
+                summary.rename(columns={'Care Home ID': 'Count'}, inplace=True)
+                total_per_region_month = monthly_df.groupby(['Month', 'Region'])['Care Home ID'].nunique().reset_index().rename(columns={'Care Home ID':'Total'})
+                summary = summary.merge(total_per_region_month, on=['Month', 'Region'])
+                summary['Percentage'] = summary['Count'] / summary['Total']
+
+                selected_month = st.selectbox(
+                    "Select Month to View Benchmark Split", 
+                    options=sorted_months, 
+                    index=len(sorted_months)-1
+                )
+
+                if selected_month:
+                    fig_bar = px.bar(
+                        summary[summary['Month'] == selected_month],
+                        x='Region', y='Percentage', color='Group',
+                        title=f"Benchmark Group Split by Region - {selected_month}",
+                        labels={'Percentage':'Percentage of Care Homes', 'Region':'Region', 'Group':'Usage Group'},
+                        barmode='stack',
+                        color_discrete_map={'High': 'green', 'Medium': 'yellow', 'Low': 'red'},
+                        category_orders={"Group": ["Low", "Medium", "High"]}
+                    )
+                    fig_bar.update_yaxes(tickformat=".0%")
+                    st.plotly_chart(fig_bar, use_container_width=True)
+                
+                st.markdown("---")
+
+                st.subheader("C. Detailed Grouping Data")
+                st.markdown("This table provides the detailed numbers and percentages used for the benchmark grouping chart above.")
+                
+                display_summary = summary[['Month', 'Region', 'Group', 'Count', 'Total', 'Percentage']].copy()
+                display_summary['Percentage'] = (display_summary['Percentage'] * 100).map('{:.1f}%'.format)
+                st.dataframe(display_summary, use_container_width=True)
+                
+                csv = summary.to_csv(index=False).encode('utf-8')
+                st.download_button(
+                    label="Download Detailed Grouping Data (.csv)",
+                    data=csv,
+                    file_name="regional_benchmark_summary.csv",
+                    mime="text/csv",
+                )
