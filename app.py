@@ -8,7 +8,8 @@ from data_processor_simple import (
     plot_judgement_accuracy, plot_high_score_params,
     predict_next_month_bayesian,
     calculate_benchmark_data,
-    geocode_uk_postcodes
+    geocode_uk_postcodes,
+    calculate_coverage_percentage
 )
 import plotly.graph_objects as go
 import plotly.express as px
@@ -411,15 +412,6 @@ elif step_title == "Overall Statistics":
                     fill_value=0
                 )
                 
-                # Sort months chronologically
-                try:
-                    heatmap_data.columns = pd.to_datetime(heatmap_data.columns.to_series().astype(str)).strftime('%Y-%m')
-                    heatmap_data = heatmap_data.reindex(sorted(heatmap_data.columns), axis=1)
-                except Exception:
-                    # Fallback for any parsing issues, just use as is
-                    pass
-
-
                 fig_heatmap = px.imshow(
                     heatmap_data,
                     labels=dict(x="Month", y="Care Home", color="High-Risk Events"),

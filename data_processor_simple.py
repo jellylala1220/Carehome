@@ -392,6 +392,11 @@ def calculate_benchmark_data(df):
     high_scores_mask = df_copy['NEWS2 Score'] >= 6
     monthly_high_scores = df_copy[high_scores_mask].groupby(['Care Home ID', 'Care Home Name', 'Month']).size().reset_index(name='high_score_count')
     
+    # 修复: 在返回前按时间排序，然后将 Period 对象转换为字符串以避免序列化错误
+    if not monthly_high_scores.empty:
+        monthly_high_scores = monthly_high_scores.sort_values(['Care Home Name', 'Month'])
+        monthly_high_scores['Month'] = monthly_high_scores['Month'].astype(str)
+
     # 2. 计算每个 care home 的统计数据
     # 计算总月数 (tm)
     total_months = df_copy.groupby('Care Home ID')['Month'].nunique().reset_index(name='tm')
@@ -416,7 +421,7 @@ def calculate_benchmark_data(df):
     # 整理列顺序
     benchmark_df = benchmark_df[['Care Home ID', 'Care Home Name', 'ci', 'tm', 'pi', 'rank']].sort_values('rank')
     
-    return benchmark_df, monthly_high_scores.sort_values(['Care Home Name', 'Month'])
+    return benchmark_df, monthly_high_scores
 
 def geocode_uk_postcodes(df, postcode_column='Post Code'):
     """
