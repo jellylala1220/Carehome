@@ -542,8 +542,8 @@ elif step_title == "Regional Analysis":
     else:
         df = st.session_state['df']
         
-        if 'Region' not in df.columns or 'No of Beds' not in df.columns:
-            st.error("Source data must contain 'Region' and 'No of Beds' columns for this analysis.")
+        if 'Area' not in df.columns or 'No of Beds' not in df.columns:
+            st.error("Source data must contain 'Area' and 'No of Beds' columns for this analysis.")
         else:
             monthly_df = get_monthly_regional_benchmark_data(df)
 
@@ -552,27 +552,27 @@ elif step_title == "Regional Analysis":
             else:
                 sorted_months = sorted(monthly_df['Month'].unique())
 
-                st.subheader("A. Monthly Usage per Bed by Region")
-                st.markdown("This boxplot shows the distribution of 'average usage per bed' across all care homes within each region, for each month.")
+                st.subheader("A. Monthly Usage per Bed by Area")
+                st.markdown("This boxplot shows the distribution of 'average usage per bed' across all care homes within each area, for each month.")
                 fig_box = px.box(
                     monthly_df,
-                    x='Month', y='Usage per Bed', color='Region',
+                    x='Month', y='Usage per Bed', color='Area',
                     category_orders={'Month': sorted_months},
-                    labels={'Usage per Bed': 'Average Usage per Bed', 'Month': 'Month', 'Region': 'Region'},
-                    title='Distribution of Monthly Usage per Bed by Region',
+                    labels={'Usage per Bed': 'Average Usage per Bed', 'Month': 'Month', 'Area': 'Area'},
+                    title='Distribution of Monthly Usage per Bed by Area',
                     points='all'
                 )
                 st.plotly_chart(fig_box, use_container_width=True)
 
                 st.markdown("---")
 
-                st.subheader("B. Regional Benchmark Grouping Percentage")
-                st.markdown("This chart shows the percentage of care homes in each benchmark group (High/Medium/Low) for each region, on a monthly basis.")
+                st.subheader("B. Area Benchmark Grouping Percentage")
+                st.markdown("This chart shows the percentage of care homes in each benchmark group (High/Medium/Low) for each area, on a monthly basis.")
 
-                summary = monthly_df.groupby(['Month', 'Region', 'Group'])['Care Home ID'].nunique().reset_index()
+                summary = monthly_df.groupby(['Month', 'Area', 'Group'])['Care Home ID'].nunique().reset_index()
                 summary.rename(columns={'Care Home ID': 'Count'}, inplace=True)
-                total_per_region_month = monthly_df.groupby(['Month', 'Region'])['Care Home ID'].nunique().reset_index().rename(columns={'Care Home ID':'Total'})
-                summary = summary.merge(total_per_region_month, on=['Month', 'Region'])
+                total_per_region_month = monthly_df.groupby(['Month', 'Area'])['Care Home ID'].nunique().reset_index().rename(columns={'Care Home ID':'Total'})
+                summary = summary.merge(total_per_region_month, on=['Month', 'Area'])
                 summary['Percentage'] = summary['Count'] / summary['Total']
 
                 selected_month = st.selectbox(
@@ -584,9 +584,9 @@ elif step_title == "Regional Analysis":
                 if selected_month:
                     fig_bar = px.bar(
                         summary[summary['Month'] == selected_month],
-                        x='Region', y='Percentage', color='Group',
-                        title=f"Benchmark Group Split by Region - {selected_month}",
-                        labels={'Percentage':'Percentage of Care Homes', 'Region':'Region', 'Group':'Usage Group'},
+                        x='Area', y='Percentage', color='Group',
+                        title=f"Benchmark Group Split by Area - {selected_month}",
+                        labels={'Percentage':'Percentage of Care Homes', 'Area':'Area', 'Group':'Usage Group'},
                         barmode='stack',
                         color_discrete_map={'High': 'green', 'Medium': 'yellow', 'Low': 'red'},
                         category_orders={"Group": ["Low", "Medium", "High"]}
@@ -599,7 +599,7 @@ elif step_title == "Regional Analysis":
                 st.subheader("C. Detailed Grouping Data")
                 st.markdown("This table provides the detailed numbers and percentages used for the benchmark grouping chart above.")
                 
-                display_summary = summary[['Month', 'Region', 'Group', 'Count', 'Total', 'Percentage']].copy()
+                display_summary = summary[['Month', 'Area', 'Group', 'Count', 'Total', 'Percentage']].copy()
                 display_summary['Percentage'] = (display_summary['Percentage'] * 100).map('{:.1f}%'.format)
                 st.dataframe(display_summary, use_container_width=True)
                 
