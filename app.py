@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 from data_processor_simple import (
-    get_care_home_list, get_care_home_info, 
+    get_care_home_list, get_care_home_info,
     process_usage_data, process_health_insights,
     plot_usage_counts, plot_usage_per_bed, plot_coverage,
     plot_news2_counts, plot_high_risk_prop, plot_concern_prop,
@@ -18,38 +18,42 @@ from streamlit_option_menu import option_menu
 
 st.set_page_config(page_title="Care Home Analysis Dashboard", layout="wide")
 
-# Sidebar navigation - 改用新的 option_menu
-with st.sidebar:
-    step_title = option_menu(
-        menu_title="Navigation",  # 菜单标题
-        options=[
-            "Upload Data", 
-            "Care Home Analysis",
-            "Batch Prediction", 
-            "Prediction Visualization",
-            "Benchmark Grouping"
-        ],
-        # 可选：为每个按钮添加图标
-        icons=[
-            "cloud-upload", 
-            "house", 
-            "cpu", 
-            "graph-up-arrow", 
-            "bar-chart-line"
-        ],
-        menu_icon="cast",  # 菜单图标
-        default_index=0,  # 默认选中的按钮
-    )
-
-# Initialize session state
+# --- Session State Initialization ---
 if 'df' not in st.session_state:
     st.session_state['df'] = None
-if 'go_analysis' not in st.session_state:
-    st.session_state['go_analysis'] = False
 if 'prediction_df' not in st.session_state:
     st.session_state['prediction_df'] = None
 
+# --- Sidebar Navigation ---
+with st.sidebar:
+    # Set default index based on whether data is loaded
+    default_page_index = 0
+    if st.session_state.df is not None:
+        default_page_index = 1
+
+    step_title = option_menu(
+        menu_title="Navigation",
+        options=[
+            "Upload Data",
+            "Care Home Analysis",
+            "Batch Prediction",
+            "Prediction Visualization",
+            "Overall Statistics"  # Renamed from "Benchmark Grouping"
+        ],
+        icons=[
+            "cloud-upload",
+            "house",
+            "cpu",
+            "graph-up-arrow",
+            "bar-chart-line"
+        ],
+        menu_icon="cast",
+        default_index=default_page_index,
+    )
+
+# ==============================================================================
 # Step 1: Upload Data
+# ==============================================================================
 if step_title == "Upload Data":
     st.title("Care Home Analysis Dashboard")
     st.header("Step 1: Upload Data")
@@ -59,18 +63,15 @@ if step_title == "Upload Data":
     if main_data_file:
         try:
             df = pd.read_excel(main_data_file)
-            
-            # Clean column names
             df.columns = [str(col).strip() for col in df.columns]
 
-            # Geocoding logic
+            # --- Geocoding Logic ---
             needs_geocoding = ('Latitude' not in df.columns or 'Longitude' not in df.columns or
                                df['Latitude'].isnull().any() or df['Longitude'].isnull().any())
             
             if needs_geocoding and 'Post Code' in df.columns:
                 with st.spinner("Geospatial data missing or incomplete. Attempting to generate from 'Post Code' column..."):
                     lat_nan_before = df['Latitude'].isnull().sum() if 'Latitude' in df.columns else len(df)
-                    
                     df = geocode_uk_postcodes(df, 'Post Code')
                     
                     if 'Latitude' in df.columns:
@@ -81,26 +82,27 @@ if step_title == "Upload Data":
                         if lat_nan_after > 0:
                             st.warning(f"Could not find coordinates for {lat_nan_after} entries. These will be excluded from the map.")
                     else:
-                         st.error("Failed to create 'Latitude'/'Longitude' columns during geocoding.")
+                        st.error("Failed to create 'Latitude'/'Longitude' columns during geocoding.")
 
             if 'Care Home Name' in df.columns:
                 df['Care Home Name'] = df['Care Home Name'].astype(str)
 
             st.session_state['df'] = df
-            st.session_state['go_analysis'] = False # Reset analysis state
             
-            st.success("File uploaded and processed successfully!")
+            st.success("File uploaded and processed successfully! You can now navigate to other sections.")
             
-            # Data overview
+            # --- Data Overview ---
             carehome_counts = df['Care Home ID'].value_counts()
             total_count = carehome_counts.sum()
             id_to_name = df.drop_duplicates('Care Home ID').set_index('Care Home ID')['Care Home Name'].astype(str).to_dict()
+            
             table = carehome_counts.reset_index()
             table.columns = ['Care Home ID', 'Count']
             table['Care Home Name'] = table['Care Home ID'].map(id_to_name)
             table['Percentage'] = (table['Count'] / total_count) * 100
             table = table[['Care Home ID', 'Care Home Name', 'Count', 'Percentage']]
             table = table.sort_values('Count', ascending=False).reset_index(drop=True)
+            
             valid_carehomes = table['Care Home ID'].tolist()
             all_carehomes = set(df['Care Home ID'].unique())
             invalid_carehomes = all_carehomes - set(valid_carehomes)
@@ -116,94 +118,94 @@ if step_title == "Upload Data":
                 table.style.format({'Percentage': '{:.1f}%'}),
                 use_container_width=True
             )
+            
+            if st.button("Go to Analysis"):
+                # This button is mostly for user guidance now.
+                # The navigation is handled by the sidebar.
+                st.info("Please use the navigation menu on the left to proceed.")
 
-            if st.button("Enter Analysis"):
-                st.session_state['go_analysis'] = True
-                st.rerun()
 
         except Exception as e:
             st.error(f"Error processing file: {e}")
+            st.session_state['df'] = None # Clear state on error
 
-    elif not main_data_file:
+    else:
         st.warning("Please upload the main data file to begin analysis.")
 
+# ==============================================================================
 # Step 2: Care Home Analysis
+# ==============================================================================
 elif step_title == "Care Home Analysis":
     st.title("Care Home Analysis Dashboard")
     st.header("Step 2: Care Home Analysis")
 
-    if st.session_state['df'] is not None and st.session_state['go_analysis']:
+    if st.session_state['df'] is not None:
         df = st.session_state['df']
 
-        st.sidebar.header("Step 2: Select Analysis Type")
-        analysis_mode = st.sidebar.radio("Analysis Level", options=["Care Home Level Analysis", "Regional Analysis"], index=0)
-
-        if analysis_mode == "Care Home Level Analysis":
-            df['Care Home Display'] = df['Care Home ID'].astype(str) + " | " + df['Care Home Name'].astype(str)
-            care_home_map = (
-                df[['Care Home ID', 'Care Home Display']]
-                .drop_duplicates()
-                .set_index('Care Home ID')['Care Home Display']
-                .to_dict()
-            )
-            care_home_id = st.sidebar.selectbox(
-                "Select Care Home",
-                options=sorted(list(care_home_map.keys())), # Sort for better UI
-                format_func=lambda x: care_home_map[x]
-            )
-            care_home = care_home_id
-            care_home_info = get_care_home_info(df, care_home)
-            beds = care_home_info.get('beds', 10)
-            
-            with st.expander("Care Home Basic Information", expanded=True):
-                st.markdown(f"**Name:** {care_home}")
-                st.markdown(f"**Number of Beds:** {beds}")
-                st.markdown(f"**Number of Observations:** {care_home_info.get('obs_count', 'N/A')}")
-                st.markdown(f"**Data Time Range:** {care_home_info.get('date_range', 'N/A')}")
-            
-            tab1, tab2 = st.tabs(["Usage Analysis", "Health Insights"])
+        st.sidebar.header("Step 2: Analysis Options")
         
-            with tab1:
-                st.header("Usage Analysis")
-                period = st.selectbox("Time Granularity", ["Daily", "Weekly", "Monthly", "Yearly"], index=2, key="usage_period")
-                usage_df = process_usage_data(df, care_home, beds, period)
-                st.plotly_chart(plot_usage_counts(usage_df, period), use_container_width=True, key="usage_counts")
-                st.plotly_chart(plot_usage_per_bed(usage_df, period), use_container_width=True, key="usage_per_bed")
-                if period == "Monthly":
-                    # This import is fine here as it's specific to this block
-                    from data_processor_simple import calculate_coverage_percentage
-                    coverage_df = calculate_coverage_percentage(df[df['Care Home ID'] == care_home])
-                    st.plotly_chart(plot_coverage(coverage_df), use_container_width=True, key="coverage")
-                else:
-                    st.info("Coverage % is only displayed in Monthly mode.")
+        df['Care Home Display'] = df['Care Home ID'].astype(str) + " | " + df['Care Home Name'].astype(str)
+        care_home_map = (
+            df[['Care Home ID', 'Care Home Display']]
+            .drop_duplicates()
+            .set_index('Care Home ID')['Care Home Display']
+            .to_dict()
+        )
+        care_home_id = st.sidebar.selectbox(
+            "Select Care Home",
+            options=sorted(list(care_home_map.keys())), # Sort for better UI
+            format_func=lambda x: care_home_map.get(x, x)
+        )
+        
+        care_home_info = get_care_home_info(df, care_home_id)
+        beds = care_home_info.get('beds', 10)
+
+        with st.expander("Care Home Basic Information", expanded=True):
+            st.markdown(f"**Name:** {care_home_info.get('name', 'N/A')}")
+            st.markdown(f"**Number of Beds:** {beds}")
+            st.markdown(f"**Number of Observations:** {care_home_info.get('obs_count', 'N/A')}")
+            st.markdown(f"**Data Time Range:** {care_home_info.get('date_range', 'N/A')}")
+
+        tab1, tab2 = st.tabs(["Usage Analysis", "Health Insights"])
+
+        with tab1:
+            st.header("Usage Analysis")
+            period = st.selectbox("Time Granularity", ["Daily", "Weekly", "Monthly", "Yearly"], index=2, key="usage_period")
+            usage_df = process_usage_data(df, care_home_id, beds, period)
+            st.plotly_chart(plot_usage_counts(usage_df, period), use_container_width=True)
+            st.plotly_chart(plot_usage_per_bed(usage_df, period), use_container_width=True)
             
-            with tab2:
-                st.header("Health Insights (Based on NEWS2)")
-                period2 = st.selectbox("Time Granularity (Health Insights)", ["Daily", "Weekly", "Monthly", "Yearly"], index=2, key="health_period")
-                
-                # 下面这一行是关键，请确保它存在！
-                hi_data = process_health_insights(df, care_home, period2)
-                
-                st.plotly_chart(plot_news2_counts(hi_data, period2), use_container_width=True, key="news2_counts")
-                st.plotly_chart(plot_high_risk_prop(hi_data, period2), use_container_width=True, key="high_risk_prop")
-                st.plotly_chart(plot_concern_prop(hi_data, period2), use_container_width=True, key="concern_prop")
-                st.plotly_chart(plot_judgement_accuracy(hi_data, period2), use_container_width=True, key="judgement_accuracy")
-                st.plotly_chart(plot_high_score_params(hi_data, period2), use_container_width=True, key="high_score_params")
+            if period == "Monthly":
+                coverage_df = calculate_coverage_percentage(df[df['Care Home ID'] == care_home_id])
+                st.plotly_chart(plot_coverage(coverage_df), use_container_width=True)
+            else:
+                st.info("Coverage % is only displayed in Monthly mode.")
 
-        else:
-            st.info("Regional Analysis is not implemented yet. Please select Care Home Level Analysis.")
+        with tab2:
+            st.header("Health Insights (Based on NEWS2)")
+            period2 = st.selectbox("Time Granularity (Health)", ["Daily", "Weekly", "Monthly", "Yearly"], index=2, key="health_period")
+            hi_data = process_health_insights(df, care_home_id, period2)
+            
+            st.plotly_chart(plot_news2_counts(hi_data, period2), use_container_width=True)
+            st.plotly_chart(plot_high_risk_prop(hi_data, period2), use_container_width=True)
+            st.plotly_chart(plot_concern_prop(hi_data, period2), use_container_width=True)
+            st.plotly_chart(plot_judgement_accuracy(hi_data, period2), use_container_width=True)
+            st.plotly_chart(plot_high_score_params(hi_data, period2), use_container_width=True)
+    
     else:
-        st.warning("Please complete Step 1 first by uploading data and entering analysis.")
+        st.warning("Please upload data in Step 1 to begin.")
 
-# Step 3: Batch Prediction (Offline)
+# ==============================================================================
+# Step 3: Batch Prediction
+# ==============================================================================
 elif step_title == "Batch Prediction":
     st.title("Care Home Analysis Dashboard")
-    st.header("Step 3: Batch Prediction (Offline)")
+    st.header("Step 3: Batch Prediction")
 
     if st.session_state['df'] is None:
         st.warning("Please upload data in Step 1 before running predictions.")
     else:
-        st.info("This step will run predictions for all care homes with sufficient data (>50 observations) and generate a downloadable CSV file.")
+        st.info("This step will run predictions for all care homes with sufficient data and generate a downloadable CSV file.")
 
         st.subheader("Prediction Parameters")
         min_obs = st.number_input("Minimum observations required per care home", min_value=1, value=50, step=10)
@@ -213,10 +215,10 @@ elif step_title == "Batch Prediction":
         if st.button("Start Batch Prediction"):
             df = st.session_state['df']
             obs_counts = df['Care Home ID'].value_counts()
-            valid_care_homes = obs_counts[obs_counts > min_obs].index.tolist()
+            valid_care_homes = obs_counts[obs_counts >= min_obs].index.tolist()
 
             if not valid_care_homes:
-                st.error(f"No care homes found with more than {min_obs} observations.")
+                st.error(f"No care homes found with at least {min_obs} observations.")
             else:
                 all_predictions = []
                 id_to_name = df.drop_duplicates('Care Home ID').set_index('Care Home ID')['Care Home Name'].to_dict()
@@ -227,10 +229,11 @@ elif step_title == "Batch Prediction":
                 for i, care_home_id in enumerate(valid_care_homes):
                     care_home_name = id_to_name.get(care_home_id, "Unknown")
                     status_text.text(f"Processing: {care_home_name} ({i+1}/{len(valid_care_homes)})...")
+                    
                     df_carehome = df[df['Care Home ID'] == care_home_id]
                     pred_df, target_month = predict_next_month_bayesian(df_carehome, window_length, sigma)
 
-                    if not pred_df.empty:
+                    if pred_df is not None and not pred_df.empty:
                         pred_df['Care Home ID'] = care_home_id
                         pred_df['Care Home Name'] = care_home_name
                         pred_df['Month'] = target_month
@@ -246,10 +249,10 @@ elif step_title == "Batch Prediction":
                     st.subheader("Prediction Results Preview")
                     st.dataframe(final_pred_df.head())
                 else:
-                    st.warning("Prediction could not be generated for any care home. This might be due to insufficient historical data (e.g., less than the window length).")
+                    st.warning("Prediction could not be generated. This might be due to insufficient historical data.")
 
     if st.session_state['prediction_df'] is not None:
-        csv = st.session_state['prediction_df'].to_csv(index=False)
+        csv = st.session_state['prediction_df'].to_csv(index=False).encode('utf-8')
         st.download_button(
             label="Download Prediction Results (.csv)",
             data=csv,
@@ -257,7 +260,9 @@ elif step_title == "Batch Prediction":
             mime="text/csv",
         )
 
+# ==============================================================================
 # Step 4: Prediction Visualization
+# ==============================================================================
 elif step_title == "Prediction Visualization":
     st.title("Care Home Analysis Dashboard")
     st.header("Step 4: Prediction Visualization")
@@ -265,266 +270,227 @@ elif step_title == "Prediction Visualization":
     if st.session_state['df'] is None:
         st.warning("Please upload the historical data in Step 1 to compare with predictions.")
     else:
-        st.info("Upload the prediction results file (generated in Step 3) to visualize.")
-        upload_pred_file = st.file_uploader(
-            "Upload Prediction Results (.csv)",
-            type=["csv"],
-            key="step4_upload"
-        )
+        st.info("Upload the prediction results file (e.g., from Step 3) to visualize.")
+        upload_pred_file = st.file_uploader("Upload Prediction Results (.csv)", type=["csv"])
 
-        if upload_pred_file and st.session_state['df'] is not None:
-            pred_df = pd.read_csv(upload_pred_file)
-            hist_df = st.session_state['df']
+        if upload_pred_file:
+            try:
+                pred_df = pd.read_csv(upload_pred_file)
+                hist_df = st.session_state['df']
 
-            hist_df['Date/Time'] = pd.to_datetime(hist_df['Date/Time'])
-            hist_df['Month'] = hist_df['Date/Time'].dt.strftime('%Y-%m')
+                # --- Data Preparation ---
+                hist_df = hist_df.rename(columns={'NEWS2 score': 'NEWS2 Score'}, errors='ignore')
+                hist_df['Date/Time'] = pd.to_datetime(hist_df['Date/Time'])
+                hist_df['Month'] = hist_df['Date/Time'].dt.to_period('M').astype(str)
+                hist_counts = hist_df.groupby(['Care Home ID', 'Care Home Name', 'Month', 'NEWS2 Score']).size().reset_index(name='Count')
 
-            if 'NEWS2 score' in hist_df.columns and 'NEWS2 Score' not in hist_df.columns:
-                hist_df.rename(columns={'NEWS2 score': 'NEWS2 Score'}, inplace=True)
+                care_homes_in_pred = sorted(pred_df['Care Home ID'].unique())
+                ch_map = pred_df[['Care Home ID', 'Care Home Name']].drop_duplicates().set_index('Care Home ID')['Care Home Name'].to_dict()
 
-            actual_counts = hist_df.groupby(['Care Home ID', 'Care Home Name', 'Month', 'NEWS2 Score']).size().reset_index(name='Actual')
-
-            pred_df['Care Home ID'] = pred_df['Care Home ID'].astype(str)
-            pred_df['NEWS2 Score'] = pred_df['NEWS2 Score'].astype(int)
-            actual_counts['Care Home ID'] = actual_counts['Care Home ID'].astype(str)
-            actual_counts['NEWS2 Score'] = actual_counts['NEWS2 Score'].astype(int)
-
-            merged_df = pd.merge(
-                pred_df,
-                actual_counts,
-                how='left',
-                on=['Care Home ID', 'Care Home Name', 'Month', 'NEWS2 Score']
-            )
-
-            st.subheader("Combined Prediction and Actual Data")
-            st.dataframe(merged_df, use_container_width=True)
-            st.subheader("Time Series Visualization (for all Care Homes)")
-            merged_df['Care Home Display'] = merged_df['Care Home ID'].astype(str) + " | " + merged_df['Care Home Name'].astype(str)
-            care_home_options = sorted(merged_df['Care Home Display'].unique())
-
-            for care_home_display in care_home_options:
-                st.markdown(f"---")
-                st.markdown(f"### {care_home_display}")
-                care_home_id = merged_df[merged_df['Care Home Display'] == care_home_display]['Care Home ID'].iloc[0]
-                full_hist_ch = actual_counts[actual_counts['Care Home ID'] == care_home_id]
-                pred_ch = merged_df[merged_df['Care Home ID'] == care_home_id]
-                score_list = sorted(pred_ch['NEWS2 Score'].unique())
-
-                for score in score_list:
-                    fig = go.Figure()
-                    hist_score_df = full_hist_ch[full_hist_ch['NEWS2 Score'] == score].sort_values('Month')
-                    if not hist_score_df.empty:
-                        fig.add_trace(go.Scatter(
-                            x=hist_score_df['Month'],
-                            y=hist_score_df['Actual'],
-                            mode='lines+markers',
-                            name='Historical Actual',
-                            line=dict(color='gray'),
-                            marker=dict(symbol='circle')
-                        ))
-                    pred_point = pred_ch[pred_ch['NEWS2 Score'] == score]
-                    if not pred_point.empty:
-                        fig.add_trace(go.Scatter(
-                            x=pred_point['Month'],
-                            y=pred_point['Predicted Mean'],
-                            mode='markers',
-                            name='Prediction',
-                            marker=dict(color='blue', size=12, symbol='diamond'),
-                            error_y=dict(
-                                type='data',
-                                symmetric=False,
-                                array=pred_point['95% Upper'] - pred_point['Predicted Mean'],
-                                arrayminus=pred_point['Predicted Mean'] - pred_point['95% Lower'],
-                                visible=True
-                            )
-                        ))
-                        if pred_point['Actual'].notna().any():
-                             fig.add_trace(go.Scatter(
-                                x=pred_point['Month'],
-                                y=pred_point['Actual'],
-                                mode='markers',
-                                name='Actual (at prediction)',
-                                marker=dict(color='red', size=12, symbol='star')
-                            ))
-                    fig.update_layout(
-                        title=f'NEWS2 Score = {score}',
-                        xaxis_title='Month',
-                        yaxis_title='Monthly Count',
-                        showlegend=True
+                # --- Filters ---
+                col1, col2 = st.columns(2)
+                with col1:
+                    selected_ch_id = st.selectbox(
+                        "Filter by Care Home",
+                        options=["All"] + care_homes_in_pred,
+                        format_func=lambda x: "All Care Homes" if x == "All" else f"{ch_map.get(x, 'Unknown')} ({x})"
                     )
-                    st.plotly_chart(fig, use_container_width=True, key=f"plot_{care_home_id}_{score}")
-        elif not upload_pred_file:
-            st.info("Awaiting upload of prediction file.")
+                with col2:
+                    score_options = ["All Scores"] + list(range(11))
+                    selected_score = st.selectbox(
+                        "Filter by NEWS2 Score",
+                        options=score_options,
+                        disabled=(selected_ch_id != "All") # Disable if a specific home is selected
+                    )
 
-# Step 5: Overall Statistics/Benchmark Grouping
-elif step_title == "Benchmark Grouping":
-    st.title("Care Home Analysis Dashboard")
-    st.header("Step 5: Overall Statistics & Benchmark Grouping")
+                # --- Visualization Logic ---
+                if selected_ch_id != "All":
+                    # --- Single Care Home View ---
+                    ch_hist = hist_counts[hist_counts['Care Home ID'] == selected_ch_id]
+                    ch_pred = pred_df[pred_df['Care Home ID'] == selected_ch_id]
+                    
+                    if not ch_pred.empty:
+                        ch_name = ch_pred['Care Home Name'].iloc[0]
+                        fig = go.Figure()
 
-    if st.session_state['df'] is None:
-        st.warning("Please upload data in Step 1 to begin this analysis.")
-    else:
-        df_full = st.session_state['df']
-        
-        # 为了生成箱线图和热力图，我们需要原始的月度数据
-        # 我们需要一个新的函数来只计算这部分
-        # (为了快速实现，我们暂时在这里复制逻辑，理想状态下应重构 data_processor)
-        
-        # --- 为箱线图和热力图准备月度数据 ---
-        df_copy = df_full.copy()
-        df_copy['Date/Time'] = pd.to_datetime(df_copy['Date/Time'])
-        df_copy['Month'] = df_copy['Date/Time'].dt.strftime('%Y-%m')
-        if 'No of Beds' not in df_copy.columns:
-            st.error("Source data must contain 'No of Beds' column for this analysis.")
-            st.stop()
-        
-        beds_info = df_copy.drop_duplicates(subset=['Care Home ID']).set_index('Care Home ID')['No of Beds']
-        monthly_counts = df_copy.groupby(['Care Home ID', 'Care Home Name', 'Month']).size().reset_index(name='Monthly Observations')
-        monthly_benchmark_df = pd.merge(monthly_counts, beds_info, on='Care Home ID')
-        monthly_benchmark_df = monthly_benchmark_df[monthly_benchmark_df['No of Beds'] > 0]
-        monthly_benchmark_df['Usage per Bed'] = monthly_benchmark_df['Monthly Observations'] / monthly_benchmark_df['No of Beds']
-        quartiles = monthly_benchmark_df.groupby('Month')['Usage per Bed'].quantile([0.25, 0.75]).unstack()
-        quartiles.columns = ['Q1', 'Q3']
-        monthly_benchmark_df = pd.merge(monthly_benchmark_df, quartiles, on='Month', how='left')
-        conditions = [
-            monthly_benchmark_df['Usage per Bed'] >= monthly_benchmark_df['Q3'],
-            monthly_benchmark_df['Usage per Bed'] <= monthly_benchmark_df['Q1']
-        ]
-        choices = ['High', 'Low']
-        monthly_benchmark_df['Group'] = np.select(conditions, choices, default='Medium')
-        group_map = {'Low': 0, 'Medium': 1, 'High': 2}
-        monthly_benchmark_df['Group Value'] = monthly_benchmark_df['Group'].map(group_map)
-        
-        # --- 现在开始计算地理分布数据 ---
-        geospatial_df = calculate_benchmark_data(df_full)
+                        # Plot historical lines
+                        for score_val in sorted(ch_hist['NEWS2 Score'].unique()):
+                            d = ch_hist[ch_hist['NEWS2 Score'] == score_val]
+                            fig.add_trace(go.Scatter(x=d['Month'], y=d['Count'], mode='lines+markers', name=f'Hist. Score {score_val}'))
 
-        if monthly_benchmark_df.empty or geospatial_df.empty:
-            st.info("Not enough data to generate benchmark statistics.")
-        else:
-            # 1. 箱线图 (Boxplot) - 使用月度数据
-            st.subheader("Monthly Distribution of Usage per Bed")
-            st.markdown("This boxplot shows the distribution of 'average usage per bed' across all care homes for each month.")
-            sorted_months = sorted(monthly_benchmark_df['Month'].unique())
-            fig_box = px.box(
-                monthly_benchmark_df,
-                x='Month',
-                y='Usage per Bed',
-                points='all',
-                category_orders={'Month': sorted_months},
-                labels={'Usage per Bed': 'Average Usage per Bed', 'Month': 'Month'},
-                title='Distribution of Monthly Usage per Bed Across All Care Homes'
-            )
-            st.plotly_chart(fig_box, use_container_width=True)
+                        # Plot prediction points with error bars
+                        fig.add_trace(go.Scatter(
+                            x=ch_pred['Month'], y=ch_pred['Predicted Mean'],
+                            error_y=dict(type='data', symmetric=False, 
+                                         array=ch_pred['95% Upper'] - ch_pred['Predicted Mean'],
+                                         arrayminus=ch_pred['Predicted Mean'] - ch_pred['95% Lower']),
+                            mode='markers', marker=dict(size=8, color='red'), name='Prediction'
+                        ))
+                        
+                        fig.update_layout(title=f"History vs. Prediction for {ch_name}", xaxis_title="Month", yaxis_title="Observation Count")
+                        st.plotly_chart(fig, use_container_width=True)
+                    else:
+                        st.warning(f"No prediction data available for Care Home ID: {selected_ch_id}")
 
-            # 2. Benchmark Grouping 热力图 (Heatmap) - 使用月度数据
-            st.subheader("Benchmark Grouping Heatmap")
-            st.markdown("This heatmap classifies each care home's monthly usage into three tiers based on the quartiles of that month's distribution.")
-            st.markdown("- **<span style='color:green;'>High</span>**: Usage ≥ 75th percentile (Q3)\n"
-                        "- **<span style='color:goldenrod;'>Medium</span>**: Usage between 25th (Q1) and 75th (Q3) percentile\n"
-                        "- **<span style='color:red;'>Low</span>**: Usage ≤ 25th percentile (Q1)",
-                        unsafe_allow_html=True)
+                elif selected_score != "All Scores":
+                    # --- All Care Homes, Single Score View ---
+                    st.subheader(f"Comparing predictions for NEWS2 Score = {selected_score}")
+                    pred_filtered = pred_df[pred_df['NEWS2 Score'] == selected_score]
+                    
+                    if not hist_counts.empty:
+                        last_month = hist_counts['Month'].max()
+                        hist_filtered = hist_counts[(hist_counts['NEWS2 Score'] == selected_score) & (hist_counts['Month'] == last_month)]
+                        comp_df = pd.merge(pred_filtered, hist_filtered[['Care Home ID', 'Count']], on="Care Home ID", how='left').fillna(0)
+                        comp_df.rename(columns={'Count': 'Last Month Actual'}, inplace=True)
+                    else: # Handle case with no historical data
+                        comp_df = pred_filtered.copy()
+                        comp_df['Last Month Actual'] = 0
+                        last_month = "N/A"
+                    
+                    if not comp_df.empty:
+                        fig = go.Figure()
+                        fig.add_trace(go.Bar(x=comp_df['Care Home Name'], y=comp_df['Last Month Actual'], name=f'Actual Count (Month: {last_month})'))
+                        fig.add_trace(go.Bar(x=comp_df['Care Home Name'], y=comp_df['Predicted Mean'], name='Predicted Mean (Next Month)',
+                                             error_y=dict(type='data', symmetric=False, array=comp_df['95% Upper'] - comp_df['Predicted Mean'],
+                                                          arrayminus=comp_df['Predicted Mean'] - comp_df['95% Lower'])))
+                        fig.update_layout(barmode='group', title=f"Actual vs. Predicted Counts for Score {selected_score}", xaxis_title="Care Home", yaxis_title="Count")
+                        st.plotly_chart(fig, use_container_width=True)
+                    else:
+                        st.warning(f"No prediction data available for NEWS2 Score = {selected_score}.")
 
-            heatmap_pivot = monthly_benchmark_df.pivot_table(
-                index='Care Home Name',
-                columns='Month',
-                values='Group Value'
-            )
-            heatmap_pivot = heatmap_pivot[sorted_months]
-            colorscale = [
-                [0, 'red'],
-                [0.5, 'yellow'],
-                [1, 'green']
-            ]
+                else:
+                    # --- Default View: All Care Homes, All Scores (in expanders) ---
+                    st.info(f"Showing prediction charts for all {len(care_homes_in_pred)} care homes. Use filters above to narrow results.")
+                    for ch_id in care_homes_in_pred:
+                        ch_name = ch_map.get(ch_id, "Unknown")
+                        with st.expander(f"View chart for: {ch_name} ({ch_id})"):
+                            ch_hist = hist_counts[hist_counts['Care Home ID'] == ch_id]
+                            ch_pred = pred_df[pred_df['Care Home ID'] == ch_id]
+                            
+                            if not ch_pred.empty:
+                                fig = go.Figure()
+                                for score in sorted(ch_hist['NEWS2 Score'].unique()):
+                                    d = ch_hist[ch_hist['NEWS2 Score'] == score]
+                                    fig.add_trace(go.Scatter(x=d['Month'], y=d['Count'], mode='lines+markers', name=f'Hist. Score {score}'))
+                                fig.add_trace(go.Scatter(
+                                    x=ch_pred['Month'], y=ch_pred['Predicted Mean'],
+                                    error_y=dict(type='data', symmetric=False, array=ch_pred['95% Upper'] - ch_pred['Predicted Mean'],
+                                                 arrayminus=ch_pred['Predicted Mean'] - ch_pred['95% Lower']),
+                                    mode='markers', marker=dict(size=10, color='red'), name='Prediction'
+                                ))
+                                fig.update_layout(title=f"History vs. Prediction for {ch_name}", xaxis_title="Month", yaxis_title="Observation Count")
+                                st.plotly_chart(fig, use_container_width=True, key=f"pred_vis_{ch_id}")
+                            else:
+                                st.write("Insufficient prediction data to display a chart.")
+            except Exception as e:
+                st.error(f"Failed to process prediction file: {e}")
 
-            # 动态计算热力图的高度
-            # 给每个护理院分配约 30-40 像素的高度，并设置一个最小高度
-            num_care_homes = len(heatmap_pivot.index)
-            heatmap_height = max(400, num_care_homes * 30)
+# ==============================================================================
+# Step 5: Overall Statistics
+# ==============================================================================
+elif step_title == "Overall Statistics":
+    st.title("Overall Statistics")
+    st.header("High-Risk Event Analysis (NEWS2 Score >= 6)")
 
-            fig_heatmap = go.Figure(data=go.Heatmap(
-                z=heatmap_pivot.values,
-                x=heatmap_pivot.columns,
-                y=heatmap_pivot.index,
-                colorscale=colorscale,
-                showscale=True,
-                colorbar=dict(
-                    title='Benchmark Group',
-                    tickvals=[0, 1, 2],
-                    ticktext=['Low', 'Medium', 'High']
-                )
-            ))
-            fig_heatmap.update_layout(
-                title='Care Home Monthly Usage Benchmark',
-                xaxis_title='Month',
-                yaxis_title='Care Home',
-                yaxis_autorange='reversed',
-                height=heatmap_height  # <--- 在这里设置动态高度
-            )
-            st.plotly_chart(fig_heatmap, use_container_width=True)
+    if st.session_state['df'] is not None:
+        df = st.session_state['df']
+        summary_df, details_df = calculate_benchmark_data(df)
 
-            # 3. 新增：地理分布图
-            st.subheader("Geospatial Distribution of High Usage Frequency")
+        tab1, tab2 = st.tabs(["Monthly Heatmap & Details", "Geospatial Map & Summary"])
+
+        with tab1:
+            st.subheader("Monthly High-Risk Event Heatmap")
+            st.info("This heatmap shows the number of high-risk events (NEWS2 >= 6) per care home each month. Darker colors indicate more events.")
             
-            if 'Latitude' not in geospatial_df.columns or 'Longitude' not in geospatial_df.columns:
-                st.warning("Geospatial map cannot be generated because 'Latitude' and/or 'Longitude' columns are missing in the source data.")
-            else:
-                st.markdown("This map shows each care home's location, colored by its frequency of being a 'High' usage facility (pi value).")
-
-                # 修复：使用 qcut 替代 cut 以处理分布不均的数据
-                # 这可以避免 "Bin edges must be unique" 的错误
-                pi_labels = ['Low', 'Medium', 'High']
-                try:
-                    geospatial_df['pi_group'] = pd.qcut(
-                        geospatial_df['pi'], 
-                        q=[0, 0.33, 0.66, 1.0], 
-                        labels=pi_labels, 
-                        duplicates='drop'
-                    )
-                except ValueError:
-                    # 如果由于数据点太少无法分箱，则将所有点归为一类
-                    geospatial_df['pi_group'] = 'Medium'
-
-                color_map = {'Low': 'red', 'Medium': 'yellow', 'High': 'green'}
+            if not details_df.empty:
+                # Pivot data for heatmap
+                heatmap_data = details_df.pivot_table(
+                    index='Care Home Name', 
+                    columns='Month', 
+                    values='high_score_count',
+                    fill_value=0
+                )
                 
-                # 创建地图
-                fig_map = px.scatter_mapbox(
-                    geospatial_df,
-                    lat="Latitude",
-                    lon="Longitude",
-                    color="pi_group",
-                    size="pi",  # 点的大小也反映 pi 值
-                    color_discrete_map=color_map,
-                    category_orders={"pi_group": ["Low", "Medium", "High"]},
-                    mapbox_style="open-street-map",
-                    zoom=5,
-                    center={"lat": 54.5, "lon": -2.0}, # 大致的英国中心
-                    hover_name="Care Home Name",
-                    hover_data={
-                        "pi": ":.2f", # 格式化 pi 值为两位小数
-                        "ci": True,
-                        "total_months": True,
-                        "Rank": True,
-                        # 隐藏不需要的悬停信息
-                        "Latitude": False,
-                        "Longitude": False,
-                        "pi_group": False
-                    }
-                )
-                fig_map.update_layout(
-                    legend_title_text='High Usage Frequency',
-                    margin={"r":0,"t":0,"l":0,"b":0}
-                )
-                st.plotly_chart(fig_map, use_container_width=True)
+                # Sort months chronologically
+                try:
+                    heatmap_data.columns = pd.to_datetime(heatmap_data.columns.to_series().astype(str)).strftime('%Y-%m')
+                    heatmap_data = heatmap_data.reindex(sorted(heatmap_data.columns), axis=1)
+                except Exception:
+                    # Fallback for any parsing issues, just use as is
+                    pass
 
-            # 4. 明细表 - 使用地理数据
-            st.subheader("Detailed High Usage Frequency Ranking")
-            display_cols = ['Rank', 'Care Home Name', 'pi', 'ci', 'total_months']
-            st.dataframe(geospatial_df[display_cols], use_container_width=True)
 
-            csv = geospatial_df[display_cols].to_csv(index=False).encode('utf-8')
+                fig_heatmap = px.imshow(
+                    heatmap_data,
+                    labels=dict(x="Month", y="Care Home", color="High-Risk Events"),
+                    x=heatmap_data.columns,
+                    y=heatmap_data.index,
+                    color_continuous_scale=px.colors.sequential.Reds
+                )
+                fig_heatmap.update_xaxes(side="bottom")
+                st.plotly_chart(fig_heatmap, use_container_width=True)
+
+                st.subheader("Detailed Monthly High-Score Events")
+                st.dataframe(details_df, use_container_width=True)
+                
+                csv_details = details_df.to_csv(index=False).encode('utf-8')
+                st.download_button(
+                    label="Download Detailed Data (.csv)",
+                    data=csv_details,
+                    file_name="care_home_monthly_details.csv",
+                    mime="text/csv"
+                )
+            else:
+                st.info("No high-risk events (NEWS2 >= 6) found in the dataset to generate a heatmap.")
+
+        with tab2:
+            st.subheader("Geospatial Distribution of High-Risk Proportions")
+            
+            if 'Latitude' in df.columns and 'Longitude' in df.columns and not summary_df.empty:
+                geo_df = df[['Care Home ID', 'Care Home Name', 'Latitude', 'Longitude']].drop_duplicates(subset=['Care Home ID'])
+                geo_df['Latitude'] = pd.to_numeric(geo_df['Latitude'], errors='coerce')
+                geo_df['Longitude'] = pd.to_numeric(geo_df['Longitude'], errors='coerce')
+                geo_df.dropna(subset=['Latitude', 'Longitude'], inplace=True)
+
+                geospatial_df = pd.merge(geo_df, summary_df[['Care Home ID', 'pi']], on='Care Home ID', how='left')
+                geospatial_df['pi'].fillna(0, inplace=True)
+                
+                if not geospatial_df.empty:
+                    pi_labels = ['Low', 'Medium', 'High']
+                    try:
+                        geospatial_df['pi_group'] = pd.qcut(geospatial_df['pi'], q=[0, 0.33, 0.66, 1.0], labels=pi_labels, duplicates='drop')
+                    except ValueError:
+                        geospatial_df['pi_group'] = 'Medium'
+                    
+                    color_map = {'Low': 'green', 'Medium': 'yellow', 'High': 'red'}
+
+                    fig_map = px.scatter_mapbox(
+                        geospatial_df, lat="Latitude", lon="Longitude",
+                        hover_name="Care Home Name", hover_data={"pi": ":.2%", "Latitude": False, "Longitude": False},
+                        color="pi_group", color_discrete_map=color_map,
+                        category_orders={"pi_group": pi_labels},
+                        zoom=5, height=600
+                    )
+                    fig_map.update_layout(mapbox_style="open-street-map", margin={"r":0,"t":0,"l":0,"b":0})
+                    st.plotly_chart(fig_map, use_container_width=True)
+                
+                else:
+                    st.warning("No valid geospatial data could be merged with summary statistics.")
+            else:
+                st.warning("Geospatial map cannot be generated. Ensure data includes valid 'Latitude'/'Longitude' columns and high-risk events exist.")
+
+            st.subheader("High-Risk Event Summary Table")
+            st.info("This table ranks care homes based on the proportion of months ('pi') with at least one high-risk event.")
+            st.dataframe(summary_df.style.format({'pi': '{:.2%}'}), use_container_width=True)
+            
+            csv_summary = summary_df.to_csv(index=False).encode('utf-8')
             st.download_button(
-                label="Download Ranking Data (.csv)",
-                data=csv,
-                file_name="care_home_pi_ranking.csv",
+                label="Download Summary Data (.csv)",
+                data=csv_summary,
+                file_name="care_home_summary_data.csv",
                 mime="text/csv",
+                key="download_summary_tab2"
             )
+
+    else:
+        st.warning("Please upload data in Step 1 to perform statistical analysis.")

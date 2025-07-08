@@ -376,82 +376,47 @@ def plot_high_score_params(hi_data, period):
 
 def calculate_benchmark_data(df):
     """
-    计算所有护理院的每月每床使用量，进行基准分组，并计算地理分布统计。
-    :param df: 包含所有观测数据的完整 DataFrame。
-    :return: 一个包含基准分析结果的 DataFrame。
+    计算每个 care home 的高风险月份统计数据.
+    现在返回两个DataFrame: 汇总基准数据和详细的月度高分记录.
     """
-    if df is None or df.empty:
-        return pd.DataFrame()
+    if df.empty or 'NEWS2 score' not in df.columns:
+        return pd.DataFrame(), pd.DataFrame()
 
-    # 确保数据类型正确
     df_copy = df.copy()
-    df_copy['Date/Time'] = pd.to_datetime(df_copy['Date/Time'])
-    df_copy['Month'] = df_copy['Date/Time'].dt.strftime('%Y-%m')
-
-    # 1. 获取每家护理院的床位数
-    # 假设床位数在数据中对于每个护理院是固定的
-    beds_info = df_copy.drop_duplicates(subset=['Care Home ID']).set_index('Care Home ID')['No of Beds']
-
-    # 2. 计算每家护理院每月的观测总数
-    monthly_counts = df_copy.groupby(['Care Home ID', 'Care Home Name', 'Month']).size().reset_index(name='Monthly Observations')
-
-    # 3. 合并床位数信息
-    benchmark_df = pd.merge(monthly_counts, beds_info, on='Care Home ID')
+    df_copy['NEWS2 Score'] = pd.to_numeric(df_copy['NEWS2 score'], errors='coerce')
+    df_copy.dropna(subset=['NEWS2 Score'], inplace=True)
     
-    # 过滤掉床位数为0或无效的情况，防止除零错误
-    benchmark_df = benchmark_df[benchmark_df['No of Beds'] > 0]
+    df_copy['Month'] = pd.to_datetime(df_copy['Date/Time']).dt.to_period('M')
 
-    # 4. 计算核心指标：平均每床使用量
-    benchmark_df['Usage per Bed'] = benchmark_df['Monthly Observations'] / benchmark_df['No of Beds']
+    # 1. 识别每个月的高风险记录
+    high_scores_mask = df_copy['NEWS2 Score'] >= 6
+    monthly_high_scores = df_copy[high_scores_mask].groupby(['Care Home ID', 'Care Home Name', 'Month']).size().reset_index(name='high_score_count')
     
-    # 5. 计算每个月的四分位数 (Q1, Q3)
-    # 我们使用 transform 将每个月的Q1, Q3值广播到该月的所有行
-    quartiles = benchmark_df.groupby('Month')['Usage per Bed'].quantile([0.25, 0.75]).unstack()
-    quartiles.columns = ['Q1', 'Q3']
+    # 2. 计算每个 care home 的统计数据
+    # 计算总月数 (tm)
+    total_months = df_copy.groupby('Care Home ID')['Month'].nunique().reset_index(name='tm')
     
-    # 将分位数合并回主表
-    benchmark_df = pd.merge(benchmark_df, quartiles, on='Month', how='left')
-
-    # 6. 根据分位数进行分组
-    conditions = [
-        benchmark_df['Usage per Bed'] >= benchmark_df['Q3'],
-        benchmark_df['Usage per Bed'] <= benchmark_df['Q1']
-    ]
-    choices = ['High', 'Low']
-    benchmark_df['Group'] = np.select(conditions, choices, default='Medium')
+    # 计算高风险月数 (ci)
+    high_risk_months_count = monthly_high_scores.groupby('Care Home ID').size().reset_index(name='ci')
     
-    group_map = {'Low': 0, 'Medium': 1, 'High': 2}
-    benchmark_df['Group Value'] = benchmark_df['Group'].map(group_map)
-
-    # 7. 统计每个 care home 的高使用月次数 (ci) 和总有效月份数
-    # is_high 是一个布尔序列，标记每个月是否为 'High'
-    benchmark_df['is_high'] = (benchmark_df['Group'] == 'High').astype(int)
+    # 合并数据
+    benchmark_df = pd.merge(total_months, high_risk_months_count, on='Care Home ID', how='left')
+    benchmark_df['ci'] = benchmark_df['ci'].fillna(0).astype(int)
     
-    # 按 care home 分组计算
-    geo_stats = benchmark_df.groupby('Care Home ID').agg(
-        ci=('is_high', 'sum'),
-        total_months=('Month', 'count')
-    ).reset_index()
-
-    # 8. 计算高使用月占比 (pi)
-    geo_stats['pi'] = geo_stats['ci'] / geo_stats['total_months']
+    # 计算高风险月占比 (pi)
+    benchmark_df['pi'] = benchmark_df['ci'] / benchmark_df['tm']
     
-    # 9. 计算排名 (Rank)
-    geo_stats['Rank'] = geo_stats['pi'].rank(method='min', ascending=False).astype(int)
+    # 添加 Care Home Name
+    id_to_name = df_copy[['Care Home ID', 'Care Home Name']].drop_duplicates().set_index('Care Home ID')
+    benchmark_df = benchmark_df.join(id_to_name, on='Care Home ID')
     
-    # 10. 将地理统计数据合并回主 benchmark_df
-    # 我们需要一个包含每个 care home 唯一信息的新表
-    care_home_info = benchmark_df.drop_duplicates(subset='Care Home ID').copy()
+    # 排名
+    benchmark_df['rank'] = benchmark_df['pi'].rank(method='min', ascending=False).astype(int)
     
-    # 合并 ci, pi, Rank
-    final_benchmark_df = pd.merge(care_home_info, geo_stats, on='Care Home ID')
-
-    # 11. 如果存在经纬度，则一并处理
-    if 'Latitude' in df.columns and 'Longitude' in df.columns:
-        lat_lon = df.drop_duplicates(subset='Care Home ID')[['Care Home ID', 'Latitude', 'Longitude']]
-        final_benchmark_df = pd.merge(final_benchmark_df, lat_lon, on='Care Home ID')
-
-    return final_benchmark_df.sort_values(by='Rank').reset_index(drop=True)
+    # 整理列顺序
+    benchmark_df = benchmark_df[['Care Home ID', 'Care Home Name', 'ci', 'tm', 'pi', 'rank']].sort_values('rank')
+    
+    return benchmark_df, monthly_high_scores.sort_values(['Care Home Name', 'Month'])
 
 def geocode_uk_postcodes(df, postcode_column='Post Code'):
     """
