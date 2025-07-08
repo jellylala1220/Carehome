@@ -34,20 +34,16 @@ def geocode_uk_postcodes(df, postcode_column='Post Code'):
         nomi = pgeocode.Nominatim('gb')
         geo_data = nomi.query_postal_code(list(unique_postcodes))
         
-        # --- FIX: Prevent Reindexing Error ---
-        # 1. Drop rows where postal_code is NaN or duplicated to ensure a unique index.
+        # Prevent Reindexing Error by ensuring the index is unique
         geo_data.dropna(subset=['postal_code'], inplace=True)
         geo_data.drop_duplicates(subset=['postal_code'], inplace=True)
-        
-        # 2. Now it's safe to set the index.
         geo_data = geo_data.set_index('postal_code')
         
-        # 3. Create maps and fill NaN values in the original DataFrame.
+        # Use Series.map for a safe lookup that handles duplicates in the source
         lat_map = geo_data['latitude']
         lon_map = geo_data['longitude']
         df_copy['Latitude'] = df_copy['Latitude'].combine_first(df_copy[postcode_column].map(lat_map))
         df_copy['Longitude'] = df_copy['Longitude'].combine_first(df_copy[postcode_column].map(lon_map))
-        # --- END FIX ---
 
     original_nan_count = df['Latitude'].isnull().sum() if 'Latitude' in df.columns else len(df)
     final_nan_count = df_copy['Latitude'].isnull().sum()
@@ -222,16 +218,13 @@ def predict_next_month_bayesian(df, care_home_id):
             
             trace = pm.sample(2000, tune=1000, cores=1, progressbar=False, return_inferencedata=True)
             
-            # --- FIX: More robust prediction sampling ---
             with model:
                 posterior_pred = pm.sample_posterior_predictive(trace, random_seed=42)
 
-            # Flatten all generated samples to get the full predictive distribution for a future month.
             next_month_samples = posterior_pred.posterior_predictive["y_pred"].values.flatten()
             
             mean_pred = np.mean(next_month_samples)
             hdi = az.hdi(next_month_samples, hdi_prob=0.94)
-            # --- END FIX ---
 
             predictions.append({
                 'NEWS2 Score': score_col,

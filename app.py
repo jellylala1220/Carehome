@@ -4,7 +4,8 @@ from data_processor_simple import (
     get_care_home_list, get_care_home_info,
     process_usage_data, process_health_insights,
     plot_usage_counts, plot_usage_per_bed, plot_coverage,
-    plot_news2_counts, plot_high_risk_prop,
+    plot_news2_counts, plot_high_risk_prop, plot_concern_prop,
+    plot_judgement_accuracy, plot_high_score_params,
     predict_next_month_bayesian,
     calculate_benchmark_data,
     geocode_uk_postcodes,
@@ -12,7 +13,7 @@ from data_processor_simple import (
 )
 import plotly.graph_objects as go
 import plotly.express as px
-from io import StringIO
+from io import BytesIO
 import numpy as np
 from streamlit_option_menu import option_menu
 
@@ -21,8 +22,8 @@ st.set_page_config(page_title="Care Home Analysis Dashboard", layout="wide")
 # --- Session State Initialization ---
 if 'df' not in st.session_state:
     st.session_state['df'] = None
-if 'prediction_df' not in st.session_state:
-    st.session_state['prediction_df'] = None
+if 'pred_df' not in st.session_state:
+    st.session_state['pred_df'] = None
 
 # --- Sidebar Navigation ---
 with st.sidebar:
@@ -49,88 +50,105 @@ with st.sidebar:
 # ==============================================================================
 if step_title == "Upload Data":
     st.title("Care Home Analysis Dashboard")
-    st.header("Step 1: Upload Data")
+    st.header("Step 1: Upload & View Data")
 
-    main_data_file = st.file_uploader("Upload Observation Data (Excel)", type=["xlsx"])
-
-    if main_data_file:
+    main_data_file = st.file_uploader(
+        "Upload your Excel data file (or it will use the cached one)",
+        type=['xlsx', 'xls']
+    )
+    
+    if main_data_file is not None:
         try:
-            with st.spinner("Processing file..."):
-                df = pd.read_excel(main_data_file)
-                df.columns = [str(col).strip() for col in df.columns]
-                df = df.rename(columns={'NEWS2 score': 'NEWS2 Score'}, errors='ignore')
-
-                needs_geocoding = ('Latitude' not in df.columns or 'Longitude' not in df.columns or
-                                   df['Latitude'].isnull().any() or df['Longitude'].isnull().any())
+            with st.spinner("Processing your data... this may take a moment."):
+                temp_df = pd.read_excel(main_data_file)
                 
-                if needs_geocoding and 'Post Code' in df.columns:
-                    df = geocode_uk_postcodes(df, 'Post Code')
-            
-            st.session_state['df'] = df
-            st.success("File uploaded and processed successfully!")
+                # Unpack the tuple (dataframe, report) returned by the function
+                geocoded_df, report = geocode_uk_postcodes(temp_df)
+                
+                # Show report to user
+                if report['added'] > 0:
+                    st.success(f"Geocoding successful: {report['added']} new coordinates added.")
+                if report['failed'] > 0:
+                    st.warning(f"Geocoding partially failed: Could not find coordinates for {report['failed']} postcodes.")
+                
+                # Store ONLY the DataFrame in the session state, NOT the tuple
+                st.session_state['df'] = geocoded_df
+                st.success("File processed successfully!")
 
         except Exception as e:
             st.error(f"Error processing file: {e}")
             st.session_state['df'] = None
     
-    # Always show the overview table if data exists in session state
     if st.session_state.get('df') is not None:
-        st.subheader("Data Overview")
-        df_overview = st.session_state.get('df')
-        carehome_counts = df_overview['Care Home ID'].value_counts()
-        id_to_name = df_overview.drop_duplicates('Care Home ID').set_index('Care Home ID')['Care Home Name'].astype(str).to_dict()
-        table = carehome_counts.reset_index()
-        table.columns = ['Care Home ID', 'Count']
-        table['Care Home Name'] = table['Care Home ID'].map(id_to_name)
-        table['Percentage'] = (table['Count'] / carehome_counts.sum()) * 100
+        st.info("Data is loaded. You can now proceed to other steps from the sidebar.")
         
-        # Adaptive height for the table
-        table_height = min(600, (len(table) + 1) * 35 + 3)
-        st.dataframe(
-            table[['Care Home ID', 'Care Home Name', 'Count', 'Percentage']].style.format({'Percentage': '{:.1f}%'}), 
-            use_container_width=True,
-            height=table_height
-        )
+        # Incorporating user's custom "Data Overview"
+        st.subheader("Data Overview")
+        try:
+            df_overview = st.session_state.get('df')
+            carehome_counts = df_overview['Care Home ID'].value_counts()
+            id_to_name = df_overview.drop_duplicates('Care Home ID').set_index('Care Home ID')['Care Home Name']
+            table = carehome_counts.reset_index()
+            table.columns = ['Care Home ID', 'Count']
+            table['Care Home Name'] = table['Care Home ID'].map(id_to_name)
+            st.dataframe(table[['Care Home Name', 'Care Home ID', 'Count']], use_container_width=True)
+        except Exception as e:
+            st.warning(f"Could not display data overview. Displaying raw data instead. Error: {e}")
+            st.dataframe(st.session_state.get('df'), use_container_width=True)
+            
+    else:
+        st.info("Please upload your data file to begin analysis.")
 
 # ==============================================================================
 # Step 2: Care Home Analysis
 # ==============================================================================
 elif step_title == "Care Home Analysis":
     st.title("Care Home Analysis Dashboard")
-    st.header("Step 2: Care Home Analysis")
+    st.header("Step 2: Single Care Home Analysis")
 
     if st.session_state.get('df') is not None:
         df = st.session_state['df']
-        st.sidebar.header("Step 2: Analysis Options")
+        care_home_list = get_care_home_list(df)
         
-        df['Care Home Display'] = df['Care Home ID'].astype(str) + " | " + df['Care Home Name'].astype(str)
-        care_home_map = df[['Care Home ID', 'Care Home Display']].drop_duplicates().set_index('Care Home ID')['Care Home Display'].to_dict()
-        care_home_id = st.sidebar.selectbox("Select Care Home", options=sorted(list(care_home_map.keys())), format_func=lambda x: care_home_map.get(x, x))
-        
-        care_home_info = get_care_home_info(df, care_home_id)
-        beds = care_home_info.get('beds', 10)
+        if not care_home_list:
+            st.warning("No care homes found in the uploaded data.")
+        else:
+            selected_care_home = st.selectbox(
+                "Select a Care Home to analyze:",
+                options=care_home_list,
+                format_func=lambda x: f"{get_care_home_info(df, x)['name']} (ID: {x})"
+            )
 
-        with st.expander("Care Home Basic Information", expanded=True):
-            st.markdown(f"**Name:** {care_home_info.get('name', 'N/A')}")
-            st.markdown(f"**Number of Beds:** {beds}")
-            st.markdown(f"**Number of Observations:** {care_home_info.get('obs_count', 'N/A')}")
-            st.markdown(f"**Data Time Range:** {care_home_info.get('date_range', 'N/A')}")
+            if selected_care_home:
+                info = get_care_home_info(df, selected_care_home)
+                st.subheader(f"Analysis for: {info['name']}")
+                st.markdown(f"**Care Home ID:** `{info['id']}` | **Post Code:** `{info['postcode']}` | **Beds:** `{info['beds']}`")
 
-        tab1, tab2 = st.tabs(["Usage Analysis", "Health Insights"])
+                tab1, tab2 = st.tabs(["Usage Analysis", "Health Insights"])
 
-        with tab1:
-            period = st.selectbox("Time Granularity", ["Daily", "Weekly", "Monthly", "Yearly"], index=2, key="usage_period")
-            usage_df = process_usage_data(df, care_home_id, beds, period)
-            st.plotly_chart(plot_usage_counts(usage_df, period), use_container_width=True, key="usage_counts_chart")
-            if period == "Monthly":
-                coverage_df = calculate_coverage_percentage(df[df['Care Home ID'] == care_home_id])
-                st.plotly_chart(plot_coverage(coverage_df), use_container_width=True, key="coverage_chart")
+                with tab1:
+                    st.subheader("Device Usage Analysis")
+                    period = st.selectbox("Time Granularity (Usage)", ["Daily", "Weekly", "Monthly"], key="usage_period")
+                    usage_df = process_usage_data(df, selected_care_home, period)
+                    st.plotly_chart(plot_usage_counts(usage_df, period), use_container_width=True)
+                    st.plotly_chart(plot_usage_per_bed(usage_df, period), use_container_width=True)
+                    
+                    if period == "Monthly":
+                        coverage_df = calculate_coverage_percentage(df[df['Care Home ID'] == selected_care_home])
+                        st.plotly_chart(plot_coverage(coverage_df), use_container_width=True)
+                    else:
+                        st.info("Coverage % is only displayed in Monthly mode.")
 
-        with tab2:
-            period2 = st.selectbox("Time Granularity (Health)", ["Daily", "Weekly", "Monthly", "Yearly"], index=2, key="health_period")
-            hi_data = process_health_insights(df, care_home_id, period2)
-            st.plotly_chart(plot_news2_counts(hi_data, period2), use_container_width=True, key="news2_counts_chart")
-            st.plotly_chart(plot_high_risk_prop(hi_data, period2), use_container_width=True, key="high_risk_chart")
+                with tab2:
+                    st.subheader("Resident Health Insights")
+                    period2 = st.selectbox("Time Granularity (Health)", ["Daily", "Weekly", "Monthly"], key="health_period")
+                    hi_data = process_health_insights(df, selected_care_home, period2)
+                    
+                    st.plotly_chart(plot_news2_counts(hi_data, period2), use_container_width=True, key="news2_counts_chart")
+                    st.plotly_chart(plot_high_risk_prop(hi_data, period2), use_container_width=True, key="high_risk_chart")
+                    st.plotly_chart(plot_concern_prop(hi_data, period2), use_container_width=True, key="concern_prop_chart")
+                    st.plotly_chart(plot_judgement_accuracy(hi_data, period2), use_container_width=True, key="judgement_chart")
+                    st.plotly_chart(plot_high_score_params(hi_data, period2), use_container_width=True, key="params_chart")
     else:
         st.warning("Please upload data in Step 1 to begin.")
 
@@ -171,11 +189,11 @@ elif step_title == "Batch Prediction":
                 status_text.success("Batch prediction complete!")
                 if all_predictions:
                     final_pred_df = pd.concat(all_predictions, ignore_index=True)
-                    st.session_state['prediction_df'] = final_pred_df
+                    st.session_state['pred_df'] = final_pred_df
                     st.dataframe(final_pred_df.head())
 
-        if st.session_state.get('prediction_df') is not None:
-            csv = st.session_state['prediction_df'].to_csv(index=False).encode('utf-8')
+        if st.session_state.get('pred_df') is not None:
+            csv = st.session_state['pred_df'].to_csv(index=False).encode('utf-8')
             st.download_button("Download Prediction Results", csv, f"preds_{pd.Timestamp.now().strftime('%Y%m%d')}.csv", "text/csv")
     else:
         st.warning("Please upload data in Step 1.")
