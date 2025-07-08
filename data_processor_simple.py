@@ -439,9 +439,7 @@ def geocode_uk_postcodes(df, postcode_column='Post Code'):
 
     df_copy = df.copy()
 
-    # Determine which rows need geocoding
     if 'Latitude' in df_copy.columns and 'Longitude' in df_copy.columns:
-        # Ensure lat/lon are numeric, coercing errors to NaN
         df_copy['Latitude'] = pd.to_numeric(df_copy['Latitude'], errors='coerce')
         df_copy['Longitude'] = pd.to_numeric(df_copy['Longitude'], errors='coerce')
         rows_to_geocode_mask = df_copy['Latitude'].isnull() | df_copy['Longitude'].isnull()
@@ -451,14 +449,10 @@ def geocode_uk_postcodes(df, postcode_column='Post Code'):
         df_copy['Longitude'] = np.nan
 
     if not rows_to_geocode_mask.any():
-        return df_copy # Nothing to do
+        return df_copy
 
     postcodes_to_query = df_copy.loc[rows_to_geocode_mask, postcode_column].astype(str).str.upper().str.strip()
-    
-    # Filter out empty or invalid postcode strings before querying
-    valid_postcodes = postcodes_to_query.dropna()
-    valid_postcodes = valid_postcodes[valid_postcodes.str.len() > 3] # Basic validation
-    valid_postcodes = valid_postcodes[valid_postcodes != 'NAN']
+    valid_postcodes = postcodes_to_query.dropna()[lambda x: (x.str.len() > 3) & (x != 'NAN')]
 
     if valid_postcodes.empty:
         return df_copy
@@ -466,12 +460,9 @@ def geocode_uk_postcodes(df, postcode_column='Post Code'):
     nomi = pgeocode.Nominatim('gb')
     geo_data = nomi.query_postal_code(valid_postcodes.tolist())
 
-    # Create Series for latitude and longitude with the correct index to align them
     latitudes = pd.Series(geo_data['latitude'].values, index=valid_postcodes.index)
     longitudes = pd.Series(geo_data['longitude'].values, index=valid_postcodes.index)
     
-    # Use the generated coordinates to fill NaNs in the respective rows
-    # The .loc accessor is important for safe assignment
     df_copy['Latitude'] = df_copy['Latitude'].fillna(latitudes)
     df_copy['Longitude'] = df_copy['Longitude'].fillna(longitudes)
     
