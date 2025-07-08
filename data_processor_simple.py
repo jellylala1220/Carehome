@@ -13,6 +13,7 @@ def geocode_uk_postcodes(df, postcode_column='Post Code'):
     """
     Generates 'Latitude' and 'Longitude' from a UK postcode column if they don't exist
     or are null. It operates on a copy and returns the modified DataFrame and a report.
+    Uses the latest pgeocode API.
     """
     if postcode_column not in df.columns:
         return df, {"added": 0, "updated": 0, "failed": 0}
@@ -27,33 +28,37 @@ def geocode_uk_postcodes(df, postcode_column='Post Code'):
     df_copy['Latitude'] = pd.to_numeric(df_copy['Latitude'], errors='coerce')
     df_copy['Longitude'] = pd.to_numeric(df_copy['Longitude'], errors='coerce')
 
-    to_geocode = df_copy[df_copy['Latitude'].isnull() | df_copy['Longitude'].isnull()]
+    # --- FIX: Use the latest pgeocode API ---
+    # We directly query all unique non-null postcodes at once
+    unique_postcodes = df_copy[postcode_column].dropna().unique()
     
-    report = {"added": 0, "updated": 0, "failed": 0}
-    
-    if not to_geocode.empty:
-        postcodes_to_query = to_geocode[postcode_column].dropna().unique()
+    if len(unique_postcodes) > 0:
+        nomi = pgeocode.Nominatim('gb')
+        # The query_postal_code method handles lists of postcodes
+        geo_data = nomi.query_postal_code(list(unique_postcodes))
         
-        if len(postcodes_to_query) > 0:
-            nomi = pgeocode.Nominatim('gb')
-            geo_data = nomi.query_postcode(list(postcodes_to_query))
-            
-            geo_data = geo_data.set_index('postcode')[['latitude', 'longitude']]
+        # We only need the columns for merging
+        geo_data = geo_data[['postal_code', 'latitude', 'longitude']].set_index('postal_code')
+        
+        # Map the results back to the original dataframe
+        df_copy = df_copy.set_index(postcode_column)
+        
+        # Use combine_first to fill NaNs in original with new data
+        df_copy['Latitude'] = df_copy['Latitude'].combine_first(geo_data['latitude'])
+        df_copy['Longitude'] = df_copy['Longitude'].combine_first(geo_data['longitude'])
+        
+        df_copy = df_copy.reset_index()
 
-            def get_lat(pc):
-                return geo_data.get(pc, {}).get('latitude')
-
-            def get_lon(pc):
-                return geo_data.get(pc, {}).get('longitude')
-
-            latitudes = to_geocode[postcode_column].apply(get_lat)
-            longitudes = to_geocode[postcode_column].apply(get_lon)
-
-            df_copy['Latitude'] = df_copy['Latitude'].combine_first(latitudes)
-            df_copy['Longitude'] = df_copy['Longitude'].combine_first(longitudes)
-
-            report['updated'] = int(latitudes.notna().sum())
-            report['failed'] = int(latitudes.isna().sum())
+    # Reporting logic can be simplified as we process all at once
+    original_nan_count = df['Latitude'].isnull().sum()
+    final_nan_count = df_copy['Latitude'].isnull().sum()
+    
+    report = {
+        "added": int(original_nan_count - final_nan_count),
+        "updated": 0, # This logic is simpler now, focusing on adding missing data
+        "failed": int(final_nan_count)
+    }
+    # --- END FIX ---
 
     return df_copy, report
     
@@ -150,13 +155,11 @@ def plot_usage_counts(df, period):
     fig.update_layout(title=f'{period} Device Usage Counts', xaxis_title='Date', yaxis_title='Count')
     return fig
 
-# --- FIX: ADDING THE MISSING FUNCTION BACK ---
 def plot_usage_per_bed(df, period):
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=df['Date'], y=df['usage_per_bed'], mode='lines+markers', name='Usage per Bed'))
     fig.update_layout(title=f'{period} Device Usage per Bed', xaxis_title='Date', yaxis_title='Usage / Bed')
     return fig
-# --- END FIX ---
 
 def plot_coverage(df):
     fig = go.Figure()
@@ -221,18 +224,19 @@ def predict_next_month_bayesian(df, care_home_id):
             
             trace = pm.sample(2000, tune=1000, cores=1, progressbar=False, return_inferencedata=True)
             
-            posterior_pred = pm.sample_posterior_predictive(trace, var_names=['y_pred'])
+            with model:
+                posterior_pred = pm.sample_posterior_predictive(trace, var_names=['y_pred'], random_seed=42)
+
+            next_month_pred_dist = posterior_pred.posterior_predictive['y_pred'].sel(chain=0)
             
-            next_month_pred = pm.draw(posterior_pred.posterior_predictive['y_pred'], draws=len(y))[-1]
-            
-            mean_pred = np.mean(next_month_pred)
-            hdi_3, hdi_97 = az.hdi(next_month_pred, hdi_prob=0.94)
+            mean_pred = next_month_pred_dist.mean().item()
+            hdi = az.hdi(next_month_pred_dist, hdi_prob=0.94)
 
             predictions.append({
                 'NEWS2 Score': score_col,
                 'predicted_mean': mean_pred,
-                'hdi_94%_lower': hdi_3,
-                'hdi_94%_upper': hdi_97
+                'hdi_94%_lower': hdi.x.data[0],
+                'hdi_94%_upper': hdi.x.data[1]
             })
             
     return pd.DataFrame(predictions)
