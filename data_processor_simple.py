@@ -266,16 +266,21 @@ def plot_coverage(df):
     return px.bar(df, x='Date', y='coverage', title='Monthly Observation Coverage', labels={'coverage': 'Coverage %'})
 
 def plot_news2_counts(hi_data, period):
-    # 修复: 恢复并优化此函数以正确处理数据
+    # 修复: 恢复并优化此函数以正确处理和"熔化"数据进行绘图
     if 'news2_counts' not in hi_data or hi_data['news2_counts'].empty: 
         return go.Figure()
     
-    # 将宽格式数据转换为长格式，以便绘图
-    df_to_plot = hi_data['news2_counts'].copy()
-    df_to_plot = df_to_plot.unstack().reset_index()
-    df_to_plot.columns = ['NEWS2 Score', 'Date', 'Count']
-
-    return px.bar(df_to_plot, x='Date', y='Count', color='NEWS2 Score', title=f'NEWS2 Score Counts ({period})', barmode='stack')
+    # The data is in a wide format (index=date, columns=scores), we need to melt it
+    df_to_plot = hi_data['news2_counts'].reset_index().rename(columns={'index': 'Date'})
+    
+    # Melt the dataframe from wide to long format suitable for px.bar
+    df_to_plot_melted = df_to_plot.melt(
+        id_vars=['Date'], 
+        var_name='NEWS2 Score', 
+        value_name='Count'
+    )
+    
+    return px.bar(df_to_plot_melted, x='Date', y='Count', color='NEWS2 Score', title=f'NEWS2 Score Counts ({period})', barmode='stack')
 
 def plot_high_risk_prop(hi_data, period):
     if 'high_risk_prop' not in hi_data or hi_data['high_risk_prop'].empty: return go.Figure()
