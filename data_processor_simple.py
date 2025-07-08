@@ -496,7 +496,7 @@ def geocode_uk_postcodes(df, postcode_column='Post Code'):
     
     # Use the generated coordinates to fill NaNs in the respective rows
     # The .loc accessor is important for safe assignment
-    df_copy['Latitude'].fillna(latitudes, inplace=True)
-    df_copy['Longitude'].fillna(longitudes, inplace=True)
+    df_copy['Latitude'] = df_copy['Latitude'].fillna(latitudes)
+    df_copy['Longitude'] = df_copy['Longitude'].fillna(longitudes)
     
     return df_copy
