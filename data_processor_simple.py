@@ -206,7 +206,7 @@ def predict_next_month_bayesian(df_carehome, window_length=2, sigma=0.5):
                 trace = pm.sample(2000, tune=1000, target_accept=0.95, progressbar=False, cores=1)
 
         # 从后验分布中获取预测
-        posterior_lam = trace.posterior["lam_pred"].values
+         posterior_lam = trace.posterior["lam_pred"].values
         
         # 使用泊松分布从后验lambda生成预测计数
         pred_counts = np.random.poisson(posterior_lam)
