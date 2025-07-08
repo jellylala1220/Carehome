@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 from data_processor_simple import (
-    get_care_home_list, get_care_home_info,
+    get_care_home_list, get_care_home_info, 
     process_usage_data, process_health_insights,
     plot_usage_counts, plot_usage_per_bed, plot_coverage,
     plot_news2_counts, plot_high_risk_prop, plot_concern_prop,
@@ -56,7 +56,7 @@ with st.sidebar:
 # Step 1: Upload Data
 # ==============================================================================
 if step_title == "Upload Data":
-    st.title("Care Home Analysis Dashboard")
+st.title("Care Home Analysis Dashboard")
     st.header("Step 1: Upload Data")
 
     main_data_file = st.file_uploader("Upload Observation Data (Excel)", type=["xlsx"])
@@ -88,37 +88,37 @@ if step_title == "Upload Data":
             if 'Care Home Name' in df.columns:
                 df['Care Home Name'] = df['Care Home Name'].astype(str)
 
-            st.session_state['df'] = df
+    st.session_state['df'] = df
             
             st.success("File uploaded and processed successfully! You can now navigate to other sections.")
             
             # --- Data Overview ---
-            carehome_counts = df['Care Home ID'].value_counts()
-            total_count = carehome_counts.sum()
+    carehome_counts = df['Care Home ID'].value_counts()
+    total_count = carehome_counts.sum()
             id_to_name = df.drop_duplicates('Care Home ID').set_index('Care Home ID')['Care Home Name'].astype(str).to_dict()
             
-            table = carehome_counts.reset_index()
-            table.columns = ['Care Home ID', 'Count']
-            table['Care Home Name'] = table['Care Home ID'].map(id_to_name)
-            table['Percentage'] = (table['Count'] / total_count) * 100
-            table = table[['Care Home ID', 'Care Home Name', 'Count', 'Percentage']]
-            table = table.sort_values('Count', ascending=False).reset_index(drop=True)
+    table = carehome_counts.reset_index()
+    table.columns = ['Care Home ID', 'Count']
+    table['Care Home Name'] = table['Care Home ID'].map(id_to_name)
+    table['Percentage'] = (table['Count'] / total_count) * 100
+    table = table[['Care Home ID', 'Care Home Name', 'Count', 'Percentage']]
+    table = table.sort_values('Count', ascending=False).reset_index(drop=True)
             
-            valid_carehomes = table['Care Home ID'].tolist()
-            all_carehomes = set(df['Care Home ID'].unique())
-            invalid_carehomes = all_carehomes - set(valid_carehomes)
-            valid_count_sum = table['Count'].sum()
+    valid_carehomes = table['Care Home ID'].tolist()
+    all_carehomes = set(df['Care Home ID'].unique())
+    invalid_carehomes = all_carehomes - set(valid_carehomes)
+    valid_count_sum = table['Count'].sum()
 
-            col1, col2, col3 = st.columns(3)
-            col1.metric("Number of Valid Care Homes", len(valid_carehomes))
-            col2.metric("Number of Invalid Care Homes", len(invalid_carehomes))
-            col3.metric("Total Valid Observations", valid_count_sum)
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Number of Valid Care Homes", len(valid_carehomes))
+    col2.metric("Number of Invalid Care Homes", len(invalid_carehomes))
+    col3.metric("Total Valid Observations", valid_count_sum)
 
-            st.subheader("Care Home Observation Counts (Descending)")
-            st.dataframe(
-                table.style.format({'Percentage': '{:.1f}%'}),
-                use_container_width=True
-            )
+    st.subheader("Care Home Observation Counts (Descending)")
+    st.dataframe(
+        table.style.format({'Percentage': '{:.1f}%'}),
+        use_container_width=True
+    )
             
             if st.button("Go to Analysis"):
                 # This button is mostly for user guidance now.
@@ -160,15 +160,15 @@ elif step_title == "Care Home Analysis":
         
         care_home_info = get_care_home_info(df, care_home_id)
         beds = care_home_info.get('beds', 10)
-
+        
         with st.expander("Care Home Basic Information", expanded=True):
             st.markdown(f"**Name:** {care_home_info.get('name', 'N/A')}")
             st.markdown(f"**Number of Beds:** {beds}")
             st.markdown(f"**Number of Observations:** {care_home_info.get('obs_count', 'N/A')}")
             st.markdown(f"**Data Time Range:** {care_home_info.get('date_range', 'N/A')}")
-
+        
         tab1, tab2 = st.tabs(["Usage Analysis", "Health Insights"])
-
+        
         with tab1:
             st.header("Usage Analysis")
             period = st.selectbox("Time Granularity", ["Daily", "Weekly", "Monthly", "Yearly"], index=2, key="usage_period")
@@ -181,7 +181,7 @@ elif step_title == "Care Home Analysis":
                 st.plotly_chart(plot_coverage(coverage_df), use_container_width=True, key="coverage_chart")
             else:
                 st.info("Coverage % is only displayed in Monthly mode.")
-
+        
         with tab2:
             st.header("Health Insights (Based on NEWS2)")
             period2 = st.selectbox("Time Granularity (Health)", ["Daily", "Weekly", "Monthly", "Yearly"], index=2, key="health_period")
@@ -285,16 +285,27 @@ elif step_title == "Prediction Visualization":
 
                 ch_map = pred_df[['Care Home ID', 'Care Home Name']].drop_duplicates().set_index('Care Home ID')['Care Home Name'].to_dict()
                 
-                # 恢复时间序列图: 移除多余的过滤器，只保留按护理院选择的功能
-                selected_ch_id = st.selectbox(
-                    "Filter by Care Home",
-                    options=["All"] + sorted(list(ch_map.keys())),
-                    format_func=lambda x: "All (Expand to see individual charts)" if x == "All" else f"{ch_map.get(x, 'Unknown')} ({x})"
-                )
+                # --- Filters ---
+                col1, col2 = st.columns(2)
+                with col1:
+                    selected_ch_id = st.selectbox(
+                        "Filter by Care Home",
+                        options=["All"] + sorted(list(ch_map.keys())),
+                        format_func=lambda x: "All Care Homes (for score comparison)" if x == "All" else f"{ch_map.get(x, 'Unknown')} ({x})"
+                    )
+                with col2:
+                    score_options = list(range(11))
+                    selected_score = st.selectbox(
+                        "Filter by NEWS2 Score (for 'All' view)",
+                        options=score_options,
+                        index=1, # Default to score 1
+                        disabled=(selected_ch_id != "All") # Disable if a specific home is selected
+                    )
 
                 # --- Visualization ---
                 if selected_ch_id != "All":
                     # --- Single Care Home Time Series View ---
+                    st.info(f"Showing full history and prediction for: {ch_map.get(selected_ch_id)}")
                     ch_hist = hist_counts[hist_counts['Care Home ID'] == selected_ch_id]
                     ch_pred = pred_df[pred_df['Care Home ID'] == selected_ch_id]
                     if not ch_pred.empty:
@@ -313,24 +324,44 @@ elif step_title == "Prediction Visualization":
                         fig.update_layout(title=f"History vs. Prediction for {ch_map.get(selected_ch_id)}", yaxis_title="Observation Count")
                         st.plotly_chart(fig, use_container_width=True)
                 else:
-                    # --- Default View: All Care Homes in Expanders ---
-                    st.info(f"Showing prediction charts for all {len(ch_map)} care homes. Expand any section to see details.")
-                    for ch_id in sorted(list(ch_map.keys())):
-                        ch_name = ch_map.get(ch_id, "Unknown")
-                        with st.expander(f"View chart for: {ch_name} ({ch_id})"):
-                            ch_hist = hist_counts[hist_counts['Care Home ID'] == ch_id]
-                            ch_pred = pred_df[pred_df['Care Home ID'] == ch_id]
-                            if not ch_pred.empty:
-                                fig = go.Figure()
-                                for score_val in sorted(ch_hist['NEWS2 Score'].unique()):
-                                    d = ch_hist[ch_hist['NEWS2 Score'] == score_val]
-                                    fig.add_trace(go.Scatter(x=d['Month'], y=d['Count'], mode='lines+markers', name=f'Hist. Score {score_val}'))
-                                for _, row in ch_pred.iterrows():
-                                    fig.add_trace(go.Scatter(x=[row['Month']], y=[row['Predicted Mean']], mode='markers', error_y=dict(type='data', symmetric=False, array=[row['95% Upper'] - row['Predicted Mean']], arrayminus=[row['Predicted Mean'] - row['95% Lower']]),name=f"Pred. Score {int(row['NEWS2 Score'])}", marker=dict(size=8)))
-                                fig.update_layout(title=f"History vs. Prediction for {ch_name}", yaxis_title="Count", height=400)
-                                st.plotly_chart(fig, use_container_width=True)
-                            else:
-                                st.write("No prediction data for this care home.")
+                    # --- All Care Homes, Single Score Comparison View ---
+                    st.subheader(f"Comparing predictions for NEWS2 Score = {selected_score}")
+                    pred_filtered = pred_df[pred_df['NEWS2 Score'] == selected_score]
+                    
+                    if not hist_counts.empty:
+                        last_month = hist_counts['Month'].max()
+                        hist_filtered = hist_counts[(hist_counts['NEWS2 Score'] == selected_score) & (hist_counts['Month'] == last_month)]
+                        # Use copy to avoid SettingWithCopyWarning
+                        comp_df = pred_filtered.copy()
+                        # Merge for comparison plot
+                        comp_df = pd.merge(comp_df, hist_filtered[['Care Home ID', 'Count']], on="Care Home ID", how='left').fillna(0)
+                        comp_df.rename(columns={'Count': 'Last Month Actual'}, inplace=True)
+                    else:
+                        comp_df = pred_filtered.copy()
+                        comp_df['Last Month Actual'] = 0
+                        last_month = "N/A"
+                    
+                    if not comp_df.empty:
+                        fig = go.Figure()
+                        fig.add_trace(go.Bar(
+                            x=comp_df['Care Home Name'],
+                            y=comp_df['Last Month Actual'],
+                            name=f'Actual Count (Month: {last_month})'
+                        ))
+                        fig.add_trace(go.Bar(
+                            x=comp_df['Care Home Name'],
+                            y=comp_df['Predicted Mean'],
+                            name='Predicted Mean (Next Month)',
+                            error_y=dict(type='data', symmetric=False,
+                                         array=comp_df['95% Upper'] - comp_df['Predicted Mean'],
+                                         arrayminus=comp_df['Predicted Mean'] - comp_df['95% Lower'])
+                        ))
+                        fig.update_layout(barmode='group', title=f"Actual vs. Predicted Counts for Score {selected_score}",
+                                          xaxis_title="Care Home", yaxis_title="Count")
+                        st.plotly_chart(fig, use_container_width=True)
+                    else:
+                        st.warning(f"No prediction data available for NEWS2 Score = {selected_score}.")
+
             except Exception as e:
                 st.error(f"Failed to process prediction file: {e}")
 

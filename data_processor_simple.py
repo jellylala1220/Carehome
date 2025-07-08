@@ -379,11 +379,11 @@ def calculate_benchmark_data(df):
     计算每个 care home 的高风险月份统计数据.
     现在返回两个DataFrame: 汇总基准数据和详细的月度高分记录.
     """
-    if df.empty or 'NEWS2 score' not in df.columns:
+    if df.empty or 'NEWS2 Score' not in df.columns:
         return pd.DataFrame(), pd.DataFrame()
 
     df_copy = df.copy()
-    df_copy['NEWS2 Score'] = pd.to_numeric(df_copy['NEWS2 score'], errors='coerce')
+    df_copy['NEWS2 Score'] = pd.to_numeric(df_copy['NEWS2 Score'], errors='coerce')
     df_copy.dropna(subset=['NEWS2 Score'], inplace=True)
     
     df_copy['Month'] = pd.to_datetime(df_copy['Date/Time']).dt.to_period('M')
@@ -392,7 +392,6 @@ def calculate_benchmark_data(df):
     high_scores_mask = df_copy['NEWS2 Score'] >= 6
     monthly_high_scores = df_copy[high_scores_mask].groupby(['Care Home ID', 'Care Home Name', 'Month']).size().reset_index(name='high_score_count')
     
-    # 修复: 在返回前按时间排序，然后将 Period 对象转换为字符串以避免序列化错误
     if not monthly_high_scores.empty:
         monthly_high_scores = monthly_high_scores.sort_values(['Care Home Name', 'Month'])
         monthly_high_scores['Month'] = monthly_high_scores['Month'].astype(str)
@@ -401,11 +400,14 @@ def calculate_benchmark_data(df):
     # 计算总月数 (tm)
     total_months = df_copy.groupby('Care Home ID')['Month'].nunique().reset_index(name='tm')
     
-    # 计算高风险月数 (ci)
-    high_risk_months_count = monthly_high_scores.groupby('Care Home ID').size().reset_index(name='ci')
-    
-    # 合并数据
-    benchmark_df = pd.merge(total_months, high_risk_months_count, on='Care Home ID', how='left')
+    # 修复: 确保即使没有高风险事件，后续步骤也能正常工作
+    if not monthly_high_scores.empty:
+        high_risk_months_count = monthly_high_scores.groupby('Care Home ID').size().reset_index(name='ci')
+        benchmark_df = pd.merge(total_months, high_risk_months_count, on='Care Home ID', how='left')
+    else:
+        benchmark_df = total_months
+        benchmark_df['ci'] = 0 # 如果没有高风险月份，ci为0
+        
     benchmark_df['ci'] = benchmark_df['ci'].fillna(0).astype(int)
     
     # 计算高风险月占比 (pi)
@@ -419,8 +421,12 @@ def calculate_benchmark_data(df):
     benchmark_df['rank'] = benchmark_df['pi'].rank(method='min', ascending=False).astype(int)
     
     # 整理列顺序
-    benchmark_df = benchmark_df[['Care Home ID', 'Care Home Name', 'ci', 'tm', 'pi', 'rank']].sort_values('rank')
-    
+    # 修复：确保 Care Home Name 列存在
+    if 'Care Home Name' in benchmark_df.columns:
+        benchmark_df = benchmark_df[['Care Home ID', 'Care Home Name', 'ci', 'tm', 'pi', 'rank']].sort_values('rank')
+    else:
+        benchmark_df = benchmark_df[['Care Home ID', 'ci', 'tm', 'pi', 'rank']].sort_values('rank')
+
     return benchmark_df, monthly_high_scores
 
 def geocode_uk_postcodes(df, postcode_column='Post Code'):
