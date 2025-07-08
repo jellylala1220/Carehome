@@ -42,59 +42,58 @@ if step == "Step 1: Upload Data":
     
     main_data_file = st.file_uploader("Upload Observation Data (Excel)", type=["xlsx"])
 
-if main_data_file and not st.session_state['go_analysis']:
-    df = pd.read_excel(main_data_file)
-        
-        # Fix data type issues - ensure Care Home Name is string
+    if main_data_file and not st.session_state['go_analysis']:
+        df = pd.read_excel(main_data_file)
+
         if 'Care Home Name' in df.columns:
             df['Care Home Name'] = df['Care Home Name'].astype(str)
+
+        st.session_state['df'] = df
         
-    st.session_state['df'] = df
-        
-    # Count observations for each Care Home
-    carehome_counts = df['Care Home ID'].value_counts()
-    total_count = carehome_counts.sum()
+        # Count observations for each Care Home
+        carehome_counts = df['Care Home ID'].value_counts()
+        total_count = carehome_counts.sum()
         
         # Care Home Name mapping - ensure string type
         id_to_name = df.drop_duplicates('Care Home ID').set_index('Care Home ID')['Care Home Name'].astype(str).to_dict()
         
-    # Construct DataFrame
-    table = carehome_counts.reset_index()
-    table.columns = ['Care Home ID', 'Count']
-    table['Care Home Name'] = table['Care Home ID'].map(id_to_name)
+        # Construct DataFrame
+        table = carehome_counts.reset_index()
+        table.columns = ['Care Home ID', 'Count']
+        table['Care Home Name'] = table['Care Home ID'].map(id_to_name)
         
-    # Percentage column
-    table['Percentage'] = (table['Count'] / total_count) * 100
+        # Percentage column
+        table['Percentage'] = (table['Count'] / total_count) * 100
         
-    # Adjust column order
-    table = table[['Care Home ID', 'Care Home Name', 'Count', 'Percentage']]
+        # Adjust column order
+        table = table[['Care Home ID', 'Care Home Name', 'Count', 'Percentage']]
         
-    # Sort by Count in descending order
-    table = table.sort_values('Count', ascending=False).reset_index(drop=True)
+        # Sort by Count in descending order
+        table = table.sort_values('Count', ascending=False).reset_index(drop=True)
         
-    # Valid/Invalid
-    valid_carehomes = table['Care Home ID'].tolist()
-    all_carehomes = set(df['Care Home ID'].unique())
-    invalid_carehomes = all_carehomes - set(valid_carehomes)
-    valid_count_sum = table['Count'].sum()
+        # Valid/Invalid
+        valid_carehomes = table['Care Home ID'].tolist()
+        all_carehomes = set(df['Care Home ID'].unique())
+        invalid_carehomes = all_carehomes - set(valid_carehomes)
+        valid_count_sum = table['Count'].sum()
         
-    # Display cards
-    col1, col2, col3 = st.columns(3)
-    col1.metric("Number of Valid Care Homes", len(valid_carehomes))
-    col2.metric("Number of Invalid Care Homes", len(invalid_carehomes))
-    col3.metric("Total Valid Observations", valid_count_sum)
+        # Display cards
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Number of Valid Care Homes", len(valid_carehomes))
+        col2.metric("Number of Invalid Care Homes", len(invalid_carehomes))
+        col3.metric("Total Valid Observations", valid_count_sum)
         
-    # Display observation count table
-    st.subheader("Care Home Observation Counts (Descending)")
-    st.dataframe(
-        table.style.format({'Percentage': '{:.1f}%'}),
-        use_container_width=True
-    )
+        # Display observation count table
+        st.subheader("Care Home Observation Counts (Descending)")
+        st.dataframe(
+            table.style.format({'Percentage': '{:.1f}%'}),
+            use_container_width=True
+        )
         
-    # Enter analysis button
-    if st.button("Enter Analysis"):
-        st.session_state['go_analysis'] = True
-        st.rerun()
+        # Enter analysis button
+        if st.button("Enter Analysis"):
+            st.session_state['go_analysis'] = True
+            st.rerun()
 
     elif not main_data_file:
         st.warning("Please upload the main data file to begin analysis.")
