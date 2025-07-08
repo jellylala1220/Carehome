@@ -132,12 +132,12 @@ elif step_title == "Care Home Analysis":
 
             with tab1:
                 st.header("Usage Analysis")
-                period = st.selectbox("Time Granularity", ["Daily", "Weekly", "Monthly", "Yearly"], index=2)
+                period = st.selectbox("Time Granularity", ["Daily", "Weekly", "Monthly", "Yearly"], index=2, key="usage_period")
                 usage_df = process_usage_data(df, care_home, beds, period)
                 st.plotly_chart(plot_usage_counts(usage_df, period), use_container_width=True, key="usage_counts")
                 st.plotly_chart(plot_usage_per_bed(usage_df, period), use_container_width=True, key="usage_per_bed")
                 if period == "Monthly":
-                    # This import can be here, as it's specific to this block
+                    # This import is fine here as it's specific to this block
                     from data_processor_simple import calculate_coverage_percentage
                     coverage_df = calculate_coverage_percentage(df[df['Care Home ID'] == care_home])
                     st.plotly_chart(plot_coverage(coverage_df), use_container_width=True, key="coverage")
@@ -147,7 +147,10 @@ elif step_title == "Care Home Analysis":
             with tab2:
                 st.header("Health Insights (Based on NEWS2)")
                 period2 = st.selectbox("Time Granularity (Health Insights)", ["Daily", "Weekly", "Monthly", "Yearly"], index=2, key="health_period")
+                
+                # 下面这一行是关键，请确保它存在！
                 hi_data = process_health_insights(df, care_home, period2)
+                
                 st.plotly_chart(plot_news2_counts(hi_data, period2), use_container_width=True, key="news2_counts")
                 st.plotly_chart(plot_high_risk_prop(hi_data, period2), use_container_width=True, key="high_risk_prop")
                 st.plotly_chart(plot_concern_prop(hi_data, period2), use_container_width=True, key="concern_prop")
