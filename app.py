@@ -10,6 +10,7 @@ from data_processor_simple import (
     calculate_benchmark_data
 )
 import plotly.graph_objects as go
+import plotly.express as px
 from io import StringIO
 import numpy as np
 
@@ -40,61 +41,61 @@ if step == "Step 1: Upload Data":
     st.header("Step 1: Upload Data")
     
     main_data_file = st.file_uploader("Upload Observation Data (Excel)", type=["xlsx"])
-    
-    if main_data_file and not st.session_state['go_analysis']:
-        df = pd.read_excel(main_data_file)
+
+if main_data_file and not st.session_state['go_analysis']:
+    df = pd.read_excel(main_data_file)
         
         # Fix data type issues - ensure Care Home Name is string
         if 'Care Home Name' in df.columns:
             df['Care Home Name'] = df['Care Home Name'].astype(str)
         
-        st.session_state['df'] = df
+    st.session_state['df'] = df
         
-        # Count observations for each Care Home
-        carehome_counts = df['Care Home ID'].value_counts()
-        total_count = carehome_counts.sum()
+    # Count observations for each Care Home
+    carehome_counts = df['Care Home ID'].value_counts()
+    total_count = carehome_counts.sum()
         
         # Care Home Name mapping - ensure string type
         id_to_name = df.drop_duplicates('Care Home ID').set_index('Care Home ID')['Care Home Name'].astype(str).to_dict()
         
-        # Construct DataFrame
-        table = carehome_counts.reset_index()
-        table.columns = ['Care Home ID', 'Count']
-        table['Care Home Name'] = table['Care Home ID'].map(id_to_name)
+    # Construct DataFrame
+    table = carehome_counts.reset_index()
+    table.columns = ['Care Home ID', 'Count']
+    table['Care Home Name'] = table['Care Home ID'].map(id_to_name)
         
-        # Percentage column
-        table['Percentage'] = (table['Count'] / total_count) * 100
+    # Percentage column
+    table['Percentage'] = (table['Count'] / total_count) * 100
         
-        # Adjust column order
-        table = table[['Care Home ID', 'Care Home Name', 'Count', 'Percentage']]
+    # Adjust column order
+    table = table[['Care Home ID', 'Care Home Name', 'Count', 'Percentage']]
         
-        # Sort by Count in descending order
-        table = table.sort_values('Count', ascending=False).reset_index(drop=True)
+    # Sort by Count in descending order
+    table = table.sort_values('Count', ascending=False).reset_index(drop=True)
         
-        # Valid/Invalid
-        valid_carehomes = table['Care Home ID'].tolist()
-        all_carehomes = set(df['Care Home ID'].unique())
-        invalid_carehomes = all_carehomes - set(valid_carehomes)
-        valid_count_sum = table['Count'].sum()
+    # Valid/Invalid
+    valid_carehomes = table['Care Home ID'].tolist()
+    all_carehomes = set(df['Care Home ID'].unique())
+    invalid_carehomes = all_carehomes - set(valid_carehomes)
+    valid_count_sum = table['Count'].sum()
         
-        # Display cards
-        col1, col2, col3 = st.columns(3)
-        col1.metric("Number of Valid Care Homes", len(valid_carehomes))
-        col2.metric("Number of Invalid Care Homes", len(invalid_carehomes))
-        col3.metric("Total Valid Observations", valid_count_sum)
+    # Display cards
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Number of Valid Care Homes", len(valid_carehomes))
+    col2.metric("Number of Invalid Care Homes", len(invalid_carehomes))
+    col3.metric("Total Valid Observations", valid_count_sum)
         
-        # Display observation count table
-        st.subheader("Care Home Observation Counts (Descending)")
-        st.dataframe(
-            table.style.format({'Percentage': '{:.1f}%'}),
-            use_container_width=True
-        )
+    # Display observation count table
+    st.subheader("Care Home Observation Counts (Descending)")
+    st.dataframe(
+        table.style.format({'Percentage': '{:.1f}%'}),
+        use_container_width=True
+    )
         
-        # Enter analysis button
-        if st.button("Enter Analysis"):
-            st.session_state['go_analysis'] = True
-            st.rerun()
-    
+    # Enter analysis button
+    if st.button("Enter Analysis"):
+        st.session_state['go_analysis'] = True
+        st.rerun()
+
     elif not main_data_file:
         st.warning("Please upload the main data file to begin analysis.")
 
@@ -106,7 +107,7 @@ elif step == "Step 2: Care Home Analysis":
     if st.session_state['df'] is not None and st.session_state['go_analysis']:
         df = st.session_state['df']
         
-        st.sidebar.header("Step 2: Select Analysis Type")
+    st.sidebar.header("Step 2: Select Analysis Type")
         analysis_mode = st.sidebar.radio("Analysis Level", options=["Care Home Level Analysis", "Regional Analysis"], index=0)
         
         if analysis_mode == "Care Home Level Analysis":
@@ -128,35 +129,35 @@ elif step == "Step 2: Care Home Analysis":
                 format_func=lambda x: care_home_map[x]
             )
             care_home = care_home_id
-            care_home_info = get_care_home_info(df, care_home)
-            beds = care_home_info.get('beds', 10)
-            
-            with st.expander("Care Home Basic Information", expanded=True):
-                st.markdown(f"**Name:** {care_home}")
-                st.markdown(f"**Number of Beds:** {beds}")
-                st.markdown(f"**Number of Observations:** {care_home_info.get('obs_count', 'N/A')}")
-                st.markdown(f"**Data Time Range:** {care_home_info.get('date_range', 'N/A')}")
-            
+        care_home_info = get_care_home_info(df, care_home)
+        beds = care_home_info.get('beds', 10)
+        
+        with st.expander("Care Home Basic Information", expanded=True):
+            st.markdown(f"**Name:** {care_home}")
+            st.markdown(f"**Number of Beds:** {beds}")
+            st.markdown(f"**Number of Observations:** {care_home_info.get('obs_count', 'N/A')}")
+            st.markdown(f"**Data Time Range:** {care_home_info.get('date_range', 'N/A')}")
+        
             # Only two tabs now
             tab1, tab2 = st.tabs(["Usage Analysis", "Health Insights"])
-
-            with tab1:
-                st.header("Usage Analysis")
-                period = st.selectbox("Time Granularity", ["Daily", "Weekly", "Monthly", "Yearly"], index=2)
-                usage_df = process_usage_data(df, care_home, beds, period)
+        
+        with tab1:
+            st.header("Usage Analysis")
+            period = st.selectbox("Time Granularity", ["Daily", "Weekly", "Monthly", "Yearly"], index=2)
+            usage_df = process_usage_data(df, care_home, beds, period)
                 st.plotly_chart(plot_usage_counts(usage_df, period), use_container_width=True, key="usage_counts")
                 st.plotly_chart(plot_usage_per_bed(usage_df, period), use_container_width=True, key="usage_per_bed")
-                if period == "Monthly":
+            if period == "Monthly":
                     from data_processor_simple import calculate_coverage_percentage
                     coverage_df = calculate_coverage_percentage(df[df['Care Home ID'] == care_home])
                     st.plotly_chart(plot_coverage(coverage_df), use_container_width=True, key="coverage")
-                else:
-                    st.info("Coverage % is only displayed in Monthly mode.")
-
-            with tab2:
-                st.header("Health Insights (Based on NEWS2)")
-                period2 = st.selectbox("Time Granularity (Health Insights)", ["Daily", "Weekly", "Monthly", "Yearly"], index=2, key="health_period")
-                hi_data = process_health_insights(df, care_home, period2)
+            else:
+                st.info("Coverage % is only displayed in Monthly mode.")
+        
+        with tab2:
+            st.header("Health Insights (Based on NEWS2)")
+            period2 = st.selectbox("Time Granularity (Health Insights)", ["Daily", "Weekly", "Monthly", "Yearly"], index=2, key="health_period")
+            hi_data = process_health_insights(df, care_home, period2)
                 st.plotly_chart(plot_news2_counts(hi_data, period2), use_container_width=True, key="news2_counts")
                 st.plotly_chart(plot_high_risk_prop(hi_data, period2), use_container_width=True, key="high_risk_prop")
                 st.plotly_chart(plot_concern_prop(hi_data, period2), use_container_width=True, key="concern_prop")
