@@ -375,7 +375,7 @@ def plot_high_score_params(hi_data, period):
 
 def calculate_benchmark_data(df):
     """
-    计算所有护理院的每月每床使用量，并进行基准分组。
+    计算所有护理院的每月每床使用量，进行基准分组，并计算地理分布统计。
     :param df: 包含所有观测数据的完整 DataFrame。
     :return: 一个包含基准分析结果的 DataFrame。
     """
@@ -419,8 +419,35 @@ def calculate_benchmark_data(df):
     choices = ['High', 'Low']
     benchmark_df['Group'] = np.select(conditions, choices, default='Medium')
     
-    # 为了热力图可视化，将分组映射为数值
     group_map = {'Low': 0, 'Medium': 1, 'High': 2}
     benchmark_df['Group Value'] = benchmark_df['Group'].map(group_map)
 
-    return benchmark_df.sort_values(by=['Care Home Name', 'Month']).reset_index(drop=True)
+    # 7. 统计每个 care home 的高使用月次数 (ci) 和总有效月份数
+    # is_high 是一个布尔序列，标记每个月是否为 'High'
+    benchmark_df['is_high'] = (benchmark_df['Group'] == 'High').astype(int)
+    
+    # 按 care home 分组计算
+    geo_stats = benchmark_df.groupby('Care Home ID').agg(
+        ci=('is_high', 'sum'),
+        total_months=('Month', 'count')
+    ).reset_index()
+
+    # 8. 计算高使用月占比 (pi)
+    geo_stats['pi'] = geo_stats['ci'] / geo_stats['total_months']
+    
+    # 9. 计算排名 (Rank)
+    geo_stats['Rank'] = geo_stats['pi'].rank(method='min', ascending=False).astype(int)
+    
+    # 10. 将地理统计数据合并回主 benchmark_df
+    # 我们需要一个包含每个 care home 唯一信息的新表
+    care_home_info = benchmark_df.drop_duplicates(subset='Care Home ID').copy()
+    
+    # 合并 ci, pi, Rank
+    final_benchmark_df = pd.merge(care_home_info, geo_stats, on='Care Home ID')
+
+    # 11. 如果存在经纬度，则一并处理
+    if 'Latitude' in df.columns and 'Longitude' in df.columns:
+        lat_lon = df.drop_duplicates(subset='Care Home ID')[['Care Home ID', 'Latitude', 'Longitude']]
+        final_benchmark_df = pd.merge(final_benchmark_df, lat_lon, on='Care Home ID')
+
+    return final_benchmark_df.sort_values(by='Rank').reset_index(drop=True)

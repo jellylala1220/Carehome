@@ -331,16 +331,49 @@ elif step_title == "Benchmark Grouping":
     if st.session_state['df'] is None:
         st.warning("Please upload data in Step 1 to begin this analysis.")
     else:
-        benchmark_df = calculate_benchmark_data(st.session_state['df'])
+        df_full = st.session_state['df']
+        
+        # 为了生成箱线图和热力图，我们需要原始的月度数据
+        # 我们需要一个新的函数来只计算这部分
+        # (为了快速实现，我们暂时在这里复制逻辑，理想状态下应重构 data_processor)
+        
+        # --- 为箱线图和热力图准备月度数据 ---
+        df_copy = df_full.copy()
+        df_copy['Date/Time'] = pd.to_datetime(df_copy['Date/Time'])
+        df_copy['Month'] = df_copy['Date/Time'].dt.strftime('%Y-%m')
+        if 'No of Beds' not in df_copy.columns:
+            st.error("Source data must contain 'No of Beds' column for this analysis.")
+            st.stop()
+        
+        beds_info = df_copy.drop_duplicates(subset=['Care Home ID']).set_index('Care Home ID')['No of Beds']
+        monthly_counts = df_copy.groupby(['Care Home ID', 'Care Home Name', 'Month']).size().reset_index(name='Monthly Observations')
+        monthly_benchmark_df = pd.merge(monthly_counts, beds_info, on='Care Home ID')
+        monthly_benchmark_df = monthly_benchmark_df[monthly_benchmark_df['No of Beds'] > 0]
+        monthly_benchmark_df['Usage per Bed'] = monthly_benchmark_df['Monthly Observations'] / monthly_benchmark_df['No of Beds']
+        quartiles = monthly_benchmark_df.groupby('Month')['Usage per Bed'].quantile([0.25, 0.75]).unstack()
+        quartiles.columns = ['Q1', 'Q3']
+        monthly_benchmark_df = pd.merge(monthly_benchmark_df, quartiles, on='Month', how='left')
+        conditions = [
+            monthly_benchmark_df['Usage per Bed'] >= monthly_benchmark_df['Q3'],
+            monthly_benchmark_df['Usage per Bed'] <= monthly_benchmark_df['Q1']
+        ]
+        choices = ['High', 'Low']
+        monthly_benchmark_df['Group'] = np.select(conditions, choices, default='Medium')
+        group_map = {'Low': 0, 'Medium': 1, 'High': 2}
+        monthly_benchmark_df['Group Value'] = monthly_benchmark_df['Group'].map(group_map)
+        
+        # --- 现在开始计算地理分布数据 ---
+        geospatial_df = calculate_benchmark_data(df_full)
 
-        if benchmark_df.empty:
+        if monthly_benchmark_df.empty or geospatial_df.empty:
             st.info("Not enough data to generate benchmark statistics.")
         else:
+            # 1. 箱线图 (Boxplot) - 使用月度数据
             st.subheader("Monthly Distribution of Usage per Bed")
             st.markdown("This boxplot shows the distribution of 'average usage per bed' across all care homes for each month.")
-            sorted_months = sorted(benchmark_df['Month'].unique())
+            sorted_months = sorted(monthly_benchmark_df['Month'].unique())
             fig_box = px.box(
-                benchmark_df,
+                monthly_benchmark_df,
                 x='Month',
                 y='Usage per Bed',
                 points='all',
@@ -350,6 +383,7 @@ elif step_title == "Benchmark Grouping":
             )
             st.plotly_chart(fig_box, use_container_width=True)
 
+            # 2. Benchmark Grouping 热力图 (Heatmap) - 使用月度数据
             st.subheader("Benchmark Grouping Heatmap")
             st.markdown("This heatmap classifies each care home's monthly usage into three tiers based on the quartiles of that month's distribution.")
             st.markdown("- **<span style='color:green;'>High</span>**: Usage ≥ 75th percentile (Q3)\n"
@@ -357,7 +391,7 @@ elif step_title == "Benchmark Grouping":
                         "- **<span style='color:red;'>Low</span>**: Usage ≤ 25th percentile (Q1)",
                         unsafe_allow_html=True)
 
-            heatmap_pivot = benchmark_df.pivot_table(
+            heatmap_pivot = monthly_benchmark_df.pivot_table(
                 index='Care Home Name',
                 columns='Month',
                 values='Group Value'
@@ -395,14 +429,60 @@ elif step_title == "Benchmark Grouping":
             )
             st.plotly_chart(fig_heatmap, use_container_width=True)
 
-            st.subheader("Detailed Benchmark Data")
-            st.markdown("The complete data used for the charts above. You can download it as a CSV file.")
-            display_cols = ['Care Home Name', 'Month', 'Usage per Bed', 'Group']
-            st.dataframe(benchmark_df[display_cols], use_container_width=True)
-            csv = benchmark_df.to_csv(index=False).encode('utf-8')
+            # 3. 新增：地理分布图
+            st.subheader("Geospatial Distribution of High Usage Frequency")
+            
+            if 'Latitude' not in geospatial_df.columns or 'Longitude' not in geospatial_df.columns:
+                st.warning("Geospatial map cannot be generated because 'Latitude' and/or 'Longitude' columns are missing in the source data.")
+            else:
+                st.markdown("This map shows each care home's location, colored by its frequency of being a 'High' usage facility (pi value).")
+
+                # 定义颜色分组
+                pi_bins = [0, geospatial_df['pi'].quantile(0.33), geospatial_df['pi'].quantile(0.66), 1]
+                pi_labels = ['Low', 'Medium', 'High']
+                geospatial_df['pi_group'] = pd.cut(geospatial_df['pi'], bins=pi_bins, labels=pi_labels, include_lowest=True)
+                
+                color_map = {'Low': 'red', 'Medium': 'yellow', 'High': 'green'}
+                
+                # 创建地图
+                fig_map = px.scatter_mapbox(
+                    geospatial_df,
+                    lat="Latitude",
+                    lon="Longitude",
+                    color="pi_group",
+                    size="pi",  # 点的大小也反映 pi 值
+                    color_discrete_map=color_map,
+                    category_orders={"pi_group": ["Low", "Medium", "High"]},
+                    mapbox_style="open-street-map",
+                    zoom=5,
+                    center={"lat": 54.5, "lon": -2.0}, # 大致的英国中心
+                    hover_name="Care Home Name",
+                    hover_data={
+                        "pi": ":.2f", # 格式化 pi 值为两位小数
+                        "ci": True,
+                        "total_months": True,
+                        "Rank": True,
+                        # 隐藏不需要的悬停信息
+                        "Latitude": False,
+                        "Longitude": False,
+                        "pi_group": False
+                    }
+                )
+                fig_map.update_layout(
+                    legend_title_text='High Usage Frequency',
+                    margin={"r":0,"t":0,"l":0,"b":0}
+                )
+                st.plotly_chart(fig_map, use_container_width=True)
+
+            # 4. 明细表 - 使用地理数据
+            st.subheader("Detailed High Usage Frequency Ranking")
+            display_cols = ['Rank', 'Care Home Name', 'pi', 'ci', 'total_months']
+            st.dataframe(geospatial_df[display_cols], use_container_width=True)
+
+            csv = geospatial_df[display_cols].to_csv(index=False).encode('utf-8')
             st.download_button(
-                label="Download Detailed Data (.csv)",
+                label="Download Ranking Data (.csv)",
                 data=csv,
-                file_name="care_home_benchmark_data.csv",
+                file_name="care_home_pi_ranking.csv",
                 mime="text/csv",
             )
