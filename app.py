@@ -13,19 +13,32 @@ import plotly.graph_objects as go
 import plotly.express as px
 from io import StringIO
 import numpy as np
+from streamlit_option_menu import option_menu
 
 st.set_page_config(page_title="Care Home Analysis Dashboard", layout="wide")
 
-# Sidebar navigation
-st.sidebar.header("Navigation")
-step = st.sidebar.radio(
-    "Select Step",
-    ["Step 1: Upload Data",
-     "Step 2: Care Home Analysis",
-     "Step 3: Batch Prediction (Offline)",
-     "Step 4: Prediction Visualization",
-     "Step 5: Overall Statistics/Benchmark Grouping"]
-)
+# Sidebar navigation - 改用新的 option_menu
+with st.sidebar:
+    step_title = option_menu(
+        menu_title="Navigation",  # 菜单标题
+        options=[
+            "Upload Data", 
+            "Care Home Analysis",
+            "Batch Prediction", 
+            "Prediction Visualization",
+            "Benchmark Grouping"
+        ],
+        # 可选：为每个按钮添加图标
+        icons=[
+            "cloud-upload", 
+            "house", 
+            "cpu", 
+            "graph-up-arrow", 
+            "bar-chart-line"
+        ],
+        menu_icon="cast",  # 菜单图标
+        default_index=0,  # 默认选中的按钮
+    )
 
 # Initialize session state
 if 'df' not in st.session_state:
@@ -36,7 +49,7 @@ if 'prediction_df' not in st.session_state:
     st.session_state['prediction_df'] = None
 
 # Step 1: Upload Data
-if step == "Step 1: Upload Data":
+if step_title == "Upload Data":
     st.title("Care Home Analysis Dashboard")
     st.header("Step 1: Upload Data")
 
@@ -82,7 +95,7 @@ if step == "Step 1: Upload Data":
         st.warning("Please upload the main data file to begin analysis.")
 
 # Step 2: Care Home Analysis
-elif step == "Step 2: Care Home Analysis":
+elif step_title == "Care Home Analysis":
     st.title("Care Home Analysis Dashboard")
     st.header("Step 2: Care Home Analysis")
 
@@ -147,7 +160,7 @@ elif step == "Step 2: Care Home Analysis":
         st.warning("Please complete Step 1 first by uploading data and entering analysis.")
 
 # Step 3: Batch Prediction (Offline)
-elif step == "Step 3: Batch Prediction (Offline)":
+elif step_title == "Batch Prediction":
     st.title("Care Home Analysis Dashboard")
     st.header("Step 3: Batch Prediction (Offline)")
 
@@ -209,7 +222,7 @@ elif step == "Step 3: Batch Prediction (Offline)":
         )
 
 # Step 4: Prediction Visualization
-elif step == "Step 4: Prediction Visualization":
+elif step_title == "Prediction Visualization":
     st.title("Care Home Analysis Dashboard")
     st.header("Step 4: Prediction Visualization")
 
@@ -303,12 +316,12 @@ elif step == "Step 4: Prediction Visualization":
                         yaxis_title='Monthly Count',
                         showlegend=True
                     )
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.plotly_chart(fig, use_container_width=True, key=f"plot_{care_home_id}_{score}")
         elif not upload_pred_file:
             st.info("Awaiting upload of prediction file.")
 
 # Step 5: Overall Statistics/Benchmark Grouping
-elif step == "Step 5: Overall Statistics/Benchmark Grouping":
+elif step_title == "Benchmark Grouping":
     st.title("Care Home Analysis Dashboard")
     st.header("Step 5: Overall Statistics & Benchmark Grouping")
 
@@ -352,6 +365,12 @@ elif step == "Step 5: Overall Statistics/Benchmark Grouping":
                 [0.5, 'yellow'],
                 [1, 'green']
             ]
+
+            # 动态计算热力图的高度
+            # 给每个护理院分配约 30-40 像素的高度，并设置一个最小高度
+            num_care_homes = len(heatmap_pivot.index)
+            heatmap_height = max(400, num_care_homes * 30)
+
             fig_heatmap = go.Figure(data=go.Heatmap(
                 z=heatmap_pivot.values,
                 x=heatmap_pivot.columns,
@@ -368,7 +387,8 @@ elif step == "Step 5: Overall Statistics/Benchmark Grouping":
                 title='Care Home Monthly Usage Benchmark',
                 xaxis_title='Month',
                 yaxis_title='Care Home',
-                yaxis_autorange='reversed'
+                yaxis_autorange='reversed',
+                height=heatmap_height  # <--- 在这里设置动态高度
             )
             st.plotly_chart(fig_heatmap, use_container_width=True)
 

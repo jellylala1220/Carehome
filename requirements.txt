@@ -17,3 +17,4 @@ scikit-learn>=1.0.0
 # 新增：
 pymc
 arviz
+streamlit-option-menu
