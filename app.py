@@ -7,7 +7,8 @@ from data_processor_simple import (
     plot_news2_counts, plot_high_risk_prop, plot_concern_prop,
     plot_judgement_accuracy, plot_high_score_params,
     predict_next_month_bayesian,
-    calculate_benchmark_data
+    calculate_benchmark_data,
+    geocode_uk_postcodes
 )
 import plotly.graph_objects as go
 import plotly.express as px
@@ -55,41 +56,73 @@ if step_title == "Upload Data":
 
     main_data_file = st.file_uploader("Upload Observation Data (Excel)", type=["xlsx"])
 
-    if main_data_file and not st.session_state['go_analysis']:
-        df = pd.read_excel(main_data_file)
+    if main_data_file:
+        try:
+            df = pd.read_excel(main_data_file)
+            
+            # Clean column names
+            df.columns = [str(col).strip() for col in df.columns]
 
-        if 'Care Home Name' in df.columns:
-            df['Care Home Name'] = df['Care Home Name'].astype(str)
+            # Geocoding logic
+            needs_geocoding = ('Latitude' not in df.columns or 'Longitude' not in df.columns or
+                               df['Latitude'].isnull().any() or df['Longitude'].isnull().any())
+            
+            if needs_geocoding and 'Post Code' in df.columns:
+                with st.spinner("Geospatial data missing or incomplete. Attempting to generate from 'Post Code' column..."):
+                    lat_nan_before = df['Latitude'].isnull().sum() if 'Latitude' in df.columns else len(df)
+                    
+                    df = geocode_uk_postcodes(df, 'Post Code')
+                    
+                    if 'Latitude' in df.columns:
+                        lat_nan_after = df['Latitude'].isnull().sum()
+                        generated_count = lat_nan_before - lat_nan_after
+                        if generated_count > 0:
+                            st.success(f"Successfully generated coordinates for {generated_count} entries.")
+                        if lat_nan_after > 0:
+                            st.warning(f"Could not find coordinates for {lat_nan_after} entries. These will be excluded from the map.")
+                    else:
+                         st.error("Failed to create 'Latitude'/'Longitude' columns during geocoding.")
 
-        st.session_state['df'] = df
-        carehome_counts = df['Care Home ID'].value_counts()
-        total_count = carehome_counts.sum()
-        id_to_name = df.drop_duplicates('Care Home ID').set_index('Care Home ID')['Care Home Name'].astype(str).to_dict()
-        table = carehome_counts.reset_index()
-        table.columns = ['Care Home ID', 'Count']
-        table['Care Home Name'] = table['Care Home ID'].map(id_to_name)
-        table['Percentage'] = (table['Count'] / total_count) * 100
-        table = table[['Care Home ID', 'Care Home Name', 'Count', 'Percentage']]
-        table = table.sort_values('Count', ascending=False).reset_index(drop=True)
-        valid_carehomes = table['Care Home ID'].tolist()
-        all_carehomes = set(df['Care Home ID'].unique())
-        invalid_carehomes = all_carehomes - set(valid_carehomes)
-        valid_count_sum = table['Count'].sum()
+            if 'Care Home Name' in df.columns:
+                df['Care Home Name'] = df['Care Home Name'].astype(str)
 
-        col1, col2, col3 = st.columns(3)
-        col1.metric("Number of Valid Care Homes", len(valid_carehomes))
-        col2.metric("Number of Invalid Care Homes", len(invalid_carehomes))
-        col3.metric("Total Valid Observations", valid_count_sum)
+            st.session_state['df'] = df
+            st.session_state['go_analysis'] = False # Reset analysis state
+            
+            st.success("File uploaded and processed successfully!")
+            
+            # Data overview
+            carehome_counts = df['Care Home ID'].value_counts()
+            total_count = carehome_counts.sum()
+            id_to_name = df.drop_duplicates('Care Home ID').set_index('Care Home ID')['Care Home Name'].astype(str).to_dict()
+            table = carehome_counts.reset_index()
+            table.columns = ['Care Home ID', 'Count']
+            table['Care Home Name'] = table['Care Home ID'].map(id_to_name)
+            table['Percentage'] = (table['Count'] / total_count) * 100
+            table = table[['Care Home ID', 'Care Home Name', 'Count', 'Percentage']]
+            table = table.sort_values('Count', ascending=False).reset_index(drop=True)
+            valid_carehomes = table['Care Home ID'].tolist()
+            all_carehomes = set(df['Care Home ID'].unique())
+            invalid_carehomes = all_carehomes - set(valid_carehomes)
+            valid_count_sum = table['Count'].sum()
 
-        st.subheader("Care Home Observation Counts (Descending)")
-        st.dataframe(
-            table.style.format({'Percentage': '{:.1f}%'}),
-            use_container_width=True
-        )
+            col1, col2, col3 = st.columns(3)
+            col1.metric("Number of Valid Care Homes", len(valid_carehomes))
+            col2.metric("Number of Invalid Care Homes", len(invalid_carehomes))
+            col3.metric("Total Valid Observations", valid_count_sum)
 
-        if st.button("Enter Analysis"):
-            st.session_state['go_analysis'] = True
-            st.rerun()
+            st.subheader("Care Home Observation Counts (Descending)")
+            st.dataframe(
+                table.style.format({'Percentage': '{:.1f}%'}),
+                use_container_width=True
+            )
+
+            if st.button("Enter Analysis"):
+                st.session_state['go_analysis'] = True
+                st.rerun()
+
+        except Exception as e:
+            st.error(f"Error processing file: {e}")
 
     elif not main_data_file:
         st.warning("Please upload the main data file to begin analysis.")

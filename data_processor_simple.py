@@ -6,6 +6,7 @@ import plotly.express as px
 from scipy import stats
 import pymc as pm
 import arviz as az
+import pgeocode
 
 # 你关心的生理参数字段
 PHYSIO_COLS = [
@@ -451,3 +452,51 @@ def calculate_benchmark_data(df):
         final_benchmark_df = pd.merge(final_benchmark_df, lat_lon, on='Care Home ID')
 
     return final_benchmark_df.sort_values(by='Rank').reset_index(drop=True)
+
+def geocode_uk_postcodes(df, postcode_column='Post Code'):
+    """
+    Generates 'Latitude' and 'Longitude' from a UK postcode column if they don't exist
+    or are null. It operates on a copy and returns the modified DataFrame.
+    """
+    if postcode_column not in df.columns:
+        return df
+
+    df_copy = df.copy()
+
+    # Determine which rows need geocoding
+    if 'Latitude' in df_copy.columns and 'Longitude' in df_copy.columns:
+        # Ensure lat/lon are numeric, coercing errors to NaN
+        df_copy['Latitude'] = pd.to_numeric(df_copy['Latitude'], errors='coerce')
+        df_copy['Longitude'] = pd.to_numeric(df_copy['Longitude'], errors='coerce')
+        rows_to_geocode_mask = df_copy['Latitude'].isnull() | df_copy['Longitude'].isnull()
+    else:
+        rows_to_geocode_mask = pd.Series([True] * len(df_copy), index=df_copy.index)
+        df_copy['Latitude'] = np.nan
+        df_copy['Longitude'] = np.nan
+
+    if not rows_to_geocode_mask.any():
+        return df_copy # Nothing to do
+
+    postcodes_to_query = df_copy.loc[rows_to_geocode_mask, postcode_column].astype(str).str.upper().str.strip()
+    
+    # Filter out empty or invalid postcode strings before querying
+    valid_postcodes = postcodes_to_query.dropna()
+    valid_postcodes = valid_postcodes[valid_postcodes.str.len() > 3] # Basic validation
+    valid_postcodes = valid_postcodes[valid_postcodes != 'NAN']
+
+    if valid_postcodes.empty:
+        return df_copy
+
+    nomi = pgeocode.Nominatim('gb')
+    geo_data = nomi.query_postal_code(valid_postcodes.tolist())
+
+    # Create Series for latitude and longitude with the correct index to align them
+    latitudes = pd.Series(geo_data['latitude'].values, index=valid_postcodes.index)
+    longitudes = pd.Series(geo_data['longitude'].values, index=valid_postcodes.index)
+    
+    # Use the generated coordinates to fill NaNs in the respective rows
+    # The .loc accessor is important for safe assignment
+    df_copy['Latitude'].fillna(latitudes, inplace=True)
+    df_copy['Longitude'].fillna(longitudes, inplace=True)
+    
+    return df_copy
