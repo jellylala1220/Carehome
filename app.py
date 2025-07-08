@@ -256,7 +256,12 @@ elif step == "Step 4: Prediction Visualization":
         # 1. Prepare historical data: count monthly observations by NEWS2 score
         hist_df['Date/Time'] = pd.to_datetime(hist_df['Date/Time'])
         hist_df['Month'] = hist_df['Date/Time'].dt.strftime('%Y-%m')
-        actual_counts = hist_df.groupby(['Care Home ID', 'Care Home Name', 'Month', 'NEWS2 score']).size().reset_index(name='Actual')
+
+        # Standardize column name to prevent KeyError. The original file might use 'NEWS2 score'.
+        if 'NEWS2 score' in hist_df.columns and 'NEWS2 Score' not in hist_df.columns:
+            hist_df.rename(columns={'NEWS2 score': 'NEWS2 Score'}, inplace=True)
+
+        actual_counts = hist_df.groupby(['Care Home ID', 'Care Home Name', 'Month', 'NEWS2 Score']).size().reset_index(name='Actual')
 
         # 2. Merge historical actuals with predictions
         # Ensure correct types for merging
