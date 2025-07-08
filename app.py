@@ -29,7 +29,7 @@ if 'prediction_df' not in st.session_state:
 with st.sidebar:
     # Set default index based on whether data is loaded
     default_page_index = 0
-    if st.session_state.df is not None:
+    if st.session_state.get('df') is not None:
         default_page_index = 1
 
     step_title = option_menu(
@@ -65,6 +65,7 @@ st.title("Care Home Analysis Dashboard")
         try:
             df = pd.read_excel(main_data_file)
             df.columns = [str(col).strip() for col in df.columns]
+            df = df.rename(columns={'NEWS2 score': 'NEWS2 Score'}, errors='ignore')
 
             # --- Geocoding Logic ---
             needs_geocoding = ('Latitude' not in df.columns or 'Longitude' not in df.columns or
@@ -124,7 +125,6 @@ st.title("Care Home Analysis Dashboard")
                 # This button is mostly for user guidance now.
                 # The navigation is handled by the sidebar.
                 st.info("Please use the navigation menu on the left to proceed.")
-
 
         except Exception as e:
             st.error(f"Error processing file: {e}")
