@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 from data_processor_simple import (
-    get_care_home_list, get_care_home_info,
+    get_care_home_list, get_care_home_info, 
     process_usage_data, process_health_insights,
     plot_usage_counts, plot_usage_per_bed, plot_coverage,
     plot_news2_counts, plot_high_risk_prop, plot_concern_prop,
@@ -148,21 +148,21 @@ elif step_title == "Care Home Analysis":
             )
             care_home_id = st.sidebar.selectbox(
                 "Select Care Home",
-                options=list(care_home_map.keys()),
+                options=sorted(list(care_home_map.keys())), # Sort for better UI
                 format_func=lambda x: care_home_map[x]
             )
             care_home = care_home_id
             care_home_info = get_care_home_info(df, care_home)
             beds = care_home_info.get('beds', 10)
-
+            
             with st.expander("Care Home Basic Information", expanded=True):
                 st.markdown(f"**Name:** {care_home}")
                 st.markdown(f"**Number of Beds:** {beds}")
                 st.markdown(f"**Number of Observations:** {care_home_info.get('obs_count', 'N/A')}")
                 st.markdown(f"**Data Time Range:** {care_home_info.get('date_range', 'N/A')}")
-
+            
             tab1, tab2 = st.tabs(["Usage Analysis", "Health Insights"])
-
+        
             with tab1:
                 st.header("Usage Analysis")
                 period = st.selectbox("Time Granularity", ["Daily", "Weekly", "Monthly", "Yearly"], index=2, key="usage_period")
@@ -176,7 +176,7 @@ elif step_title == "Care Home Analysis":
                     st.plotly_chart(plot_coverage(coverage_df), use_container_width=True, key="coverage")
                 else:
                     st.info("Coverage % is only displayed in Monthly mode.")
-
+            
             with tab2:
                 st.header("Health Insights (Based on NEWS2)")
                 period2 = st.selectbox("Time Granularity (Health Insights)", ["Daily", "Weekly", "Monthly", "Yearly"], index=2, key="health_period")
@@ -470,11 +470,20 @@ elif step_title == "Benchmark Grouping":
             else:
                 st.markdown("This map shows each care home's location, colored by its frequency of being a 'High' usage facility (pi value).")
 
-                # 定义颜色分组
-                pi_bins = [0, geospatial_df['pi'].quantile(0.33), geospatial_df['pi'].quantile(0.66), 1]
+                # 修复：使用 qcut 替代 cut 以处理分布不均的数据
+                # 这可以避免 "Bin edges must be unique" 的错误
                 pi_labels = ['Low', 'Medium', 'High']
-                geospatial_df['pi_group'] = pd.cut(geospatial_df['pi'], bins=pi_bins, labels=pi_labels, include_lowest=True)
-                
+                try:
+                    geospatial_df['pi_group'] = pd.qcut(
+                        geospatial_df['pi'], 
+                        q=[0, 0.33, 0.66, 1.0], 
+                        labels=pi_labels, 
+                        duplicates='drop'
+                    )
+                except ValueError:
+                    # 如果由于数据点太少无法分箱，则将所有点归为一类
+                    geospatial_df['pi_group'] = 'Medium'
+
                 color_map = {'Low': 'red', 'Medium': 'yellow', 'High': 'green'}
                 
                 # 创建地图
