@@ -1,4 +1,3 @@
-# NOTE: This file uses 4 spaces for indentation. Please ensure no tabs are used.
 import pandas as pd
 import numpy as np
 from datetime import datetime
@@ -9,263 +8,495 @@ import pymc as pm
 import arviz as az
 import pgeocode
 
-def geocode_uk_postcodes(df, postcode_column='Post Code'):
-    """
-    Generates 'Latitude' and 'Longitude' from a UK postcode column if they don't exist
-    or are null. It operates on a copy and returns the modified DataFrame and a report.
-    Uses the latest pgeocode API and safely handles duplicate postcodes.
-    """
-    if postcode_column not in df.columns:
-        return df, {"added": 0, "updated": 0, "failed": 0}
+# 你关心的生理参数字段
+PHYSIO_COLS = [
+    "O2_New", "Systolic_New", "Pulse_New", "Temperate_New",
+    "Respiraties_New", "O2 Delivery_New", "Consciouness New"
+]
 
-    df_copy = df.copy()
-
-    if 'Latitude' not in df_copy.columns:
-        df_copy['Latitude'] = np.nan
-    if 'Longitude' not in df_copy.columns:
-        df_copy['Longitude'] = np.nan
-        
-    df_copy['Latitude'] = pd.to_numeric(df_copy['Latitude'], errors='coerce')
-    df_copy['Longitude'] = pd.to_numeric(df_copy['Longitude'], errors='coerce')
-
-    unique_postcodes = df_copy[postcode_column].dropna().unique()
-    
-    if len(unique_postcodes) > 0:
-        nomi = pgeocode.Nominatim('gb')
-        geo_data = nomi.query_postal_code(list(unique_postcodes))
-        
-        # Prevent Reindexing Error by ensuring the index is unique
-        geo_data.dropna(subset=['postal_code'], inplace=True)
-        geo_data.drop_duplicates(subset=['postal_code'], inplace=True)
-        geo_data = geo_data.set_index('postal_code')
-        
-        # Use Series.map for a safe lookup that handles duplicates in the source
-        lat_map = geo_data['latitude']
-        lon_map = geo_data['longitude']
-        df_copy['Latitude'] = df_copy['Latitude'].combine_first(df_copy[postcode_column].map(lat_map))
-        df_copy['Longitude'] = df_copy['Longitude'].combine_first(df_copy[postcode_column].map(lon_map))
-
-    original_nan_count = df['Latitude'].isnull().sum() if 'Latitude' in df.columns else len(df)
-    final_nan_count = df_copy['Latitude'].isnull().sum()
-    
-    report = {
-        "added": int(original_nan_count - final_nan_count),
-        "updated": 0,
-        "failed": int(final_nan_count)
-    }
-
-    return df_copy, report
-    
 def get_care_home_list(df):
-    if 'Care Home ID' not in df.columns:
-        return []
-    return sorted(df['Care Home ID'].unique())
+    """获取所有 Care Home 列表"""
+    return sorted(df['Care Home ID'].unique().tolist())
 
 def get_care_home_info(df, care_home_id):
-    home_df = df[df['Care Home ID'] == care_home_id]
-    if not home_df.empty:
-        info = home_df.iloc[0]
-        return {
-            'id': care_home_id,
-            'name': info.get('Care Home Name', 'N/A'),
-            'postcode': info.get('Post Code', 'N/A'),
-            'beds': info.get('Number of Beds', 'N/A')
-        }
-    return {}
+    """返回指定Care Home ID的基本信息"""
+    care_home_id = str(care_home_id).strip()
+    df['Care Home ID'] = df['Care Home ID'].astype(str).str.strip()
+    rows = df[df['Care Home ID'] == care_home_id]
+    
+    if rows.empty:
+        return {}
+    
+    row = rows.iloc[0]
+    info = {
+        'name': row.get('Care Home Name', ''),
+        'beds': row.get('No of Beds', 10),
+        'obs_count': len(rows),
+        'date_range': f"{rows['Date/Time'].min().date()} to {rows['Date/Time'].max().date()}"
+    }
+    return info
 
-def process_usage_data(df, care_home_id, period):
-    ch_df = df[df['Care Home ID'] == care_home_id].copy()
-    ch_df['Date'] = pd.to_datetime(ch_df['Date'])
+def process_usage_data(df, care_home_id, beds, period):
+    """处理使用数据"""
+    care_home_id = str(care_home_id).strip()
+    df['Care Home ID'] = df['Care Home ID'].astype(str).str.strip()
+    care_home_data = df[df['Care Home ID'] == care_home_id]
     
-    freq_map = {"Daily": "D", "Weekly": "W", "Monthly": "M"}
-    freq = freq_map.get(period, "D")
+    if care_home_data.empty:
+        return pd.DataFrame()
     
-    usage = ch_df.groupby(pd.Grouper(key='Date', freq=freq)).size().reset_index(name='count')
-    beds = get_care_home_info(df, care_home_id).get('beds', np.nan)
-    if pd.isna(beds) or beds == 0:
-        usage['usage_per_bed'] = 0
-    else:
-        usage['usage_per_bed'] = usage['count'] / beds
+    dt_col = pd.to_datetime(care_home_data['Date/Time'])
     
-    return usage
+    if period == 'Daily':
+        grouped = care_home_data.groupby(dt_col.dt.date).size()
+        grouped.index = pd.to_datetime(grouped.index)
+    elif period == 'Weekly':
+        grouped = care_home_data.groupby(dt_col.dt.to_period('W')).size()
+        grouped.index = grouped.index.to_timestamp()
+    elif period == 'Monthly':
+        grouped = care_home_data.groupby(dt_col.dt.to_period('M')).size()
+        grouped.index = grouped.index.to_timestamp()
+    else:  # Yearly
+        grouped = care_home_data.groupby(dt_col.dt.to_period('Y')).size()
+        grouped.index = grouped.index.to_timestamp()
+    
+    usage_df = grouped.reset_index()
+    usage_df.columns = ['Date', 'Count']
+    usage_df['Usage_per_bed'] = usage_df['Count'] / beds
+    
+    return usage_df.sort_values('Date')
+
+def calculate_coverage_percentage(data):
+    """计算覆盖率百分比"""
+    if data is None or data.empty:
+        return pd.DataFrame()
+    
+    dt_col = pd.to_datetime(data['Date/Time'])
+    monthly = data.groupby(dt_col.dt.to_period('M'))
+    coverage = []
+    days_list = []
+    total_days_list = []
+    months = []
+    
+    for month, group in monthly:
+        days_with_obs = group['Date/Time'].dt.date.nunique()
+        total_days = pd.Period(month).days_in_month
+        percent = days_with_obs / total_days  # 0-1比例
+        coverage.append(percent)
+        days_list.append(days_with_obs)
+        total_days_list.append(total_days)
+        months.append(month.to_timestamp())
+    
+    return pd.DataFrame({
+        'Date': pd.to_datetime(months),
+        'coverage': coverage,
+        'days_with_obs': days_list,
+        'total_days': total_days_list
+    }).sort_values('Date')
 
 def process_health_insights(df, care_home_id, period):
-    ch_df = df[df['Care Home ID'] == care_home_id].copy()
-    ch_df['Date'] = pd.to_datetime(ch_df['Date'])
-    ch_df['NEWS2 Score'] = pd.to_numeric(ch_df['NEWS2 Score'], errors='coerce')
+    """处理健康洞察数据"""
+    care_home_id = str(care_home_id).strip()
+    df['Care Home ID'] = df['Care Home ID'].astype(str).str.strip()
+    care_home_data = df[df['Care Home ID'] == care_home_id]
     
-    freq_map = {"Daily": "D", "Weekly": "W", "Monthly": "M"}
-    freq = freq_map.get(period, "D")
+    if care_home_data.empty or 'NEWS2 score' not in care_home_data.columns:
+        return {}
     
-    grouped = ch_df.groupby(pd.Grouper(key='Date', freq=freq))
+    dt_col = pd.to_datetime(care_home_data['Date/Time'])
     
-    result = grouped['NEWS2 Score'].agg(['count', lambda x: (x >= 6).sum(), lambda x: ((x >= 3) & (x < 6)).sum()]).reset_index()
-    result.columns = ['Date', 'total_readings', 'high_risk_count', 'concern_count']
+    if period == 'Daily':
+        grouped = care_home_data.groupby(dt_col.dt.date)
+    elif period == 'Weekly':
+        grouped = care_home_data.groupby(dt_col.dt.to_period('W'))
+    elif period == 'Monthly':
+        grouped = care_home_data.groupby(dt_col.dt.to_period('M'))
+    else:  # Yearly
+        grouped = care_home_data.groupby(dt_col.dt.to_period('Y'))
     
-    result['high_risk_prop'] = result['high_risk_count'] / result['total_readings']
-    result['concern_prop'] = result['concern_count'] / result['total_readings']
+    # 计算各种指标
+    news2_counts = {}
+    high_risk_prop = {}
+    concern_prop = {}
+    judgement_accuracy = {}
     
-    judgement_df = ch_df.dropna(subset=['Clinical Judgement', 'NEWS2 Score'])
-    judgement_grouped = judgement_df.groupby(pd.Grouper(key='Date', freq=freq))
-    accuracy = judgement_grouped.apply(lambda x: ((x['Clinical Judgement'] == 'Normal') & (x['NEWS2 Score'] < 3) | (x['Clinical Judgement'] != 'Normal') & (x['NEWS2 Score'] >= 3)).mean()).reset_index(name='accuracy')
-    
-    result = pd.merge(result, accuracy, on='Date', how='left')
-    
-    high_score_df = ch_df[ch_df['NEWS2 Score'] >= 6]
-    param_cols = ['Respiration', 'Oxygen Saturation', 'Supplemental Oxygen', 'Temperature', 'Blood Pressure', 'Heart Rate', 'Consciousness']
-    
-    param_counts_list = []
-    if not high_score_df.empty:
-        for name, group in high_score_df.groupby(pd.Grouper(key='Date', freq=freq)):
-            date_counts = {'Date': name}
-            for col in param_cols:
-                if col in group:
-                    date_counts[col] = (group[col] > 0).sum()
-            param_counts_list.append(date_counts)
-
-    if param_counts_list:
-        param_counts = pd.DataFrame(param_counts_list)
-        result = pd.merge(result, param_counts, on='Date', how='left')
-    
-    return result.fillna(0)
-
-def calculate_coverage_percentage(df):
-    df['Date'] = pd.to_datetime(df['Date'])
-    df['month'] = df['Date'].dt.to_period('M')
-    
-    num_beds = df['Number of Beds'].iloc[0] if not df.empty else 0
-    if num_beds == 0:
-        return pd.DataFrame({'month': [], 'coverage': []})
+    for period_name, group in grouped:
+        if period == 'Daily':
+            period_key = pd.to_datetime(period_name)
+        else:
+            period_key = period_name.to_timestamp()
         
-    monthly_coverage = df.groupby('month')['Resident ID'].nunique().reset_index()
-    monthly_coverage.columns = ['month', 'active_residents']
-    monthly_coverage['coverage'] = (monthly_coverage['active_residents'] / num_beds) * 100
-    monthly_coverage['month'] = monthly_coverage['month'].dt.to_timestamp()
-    return monthly_coverage
+        # NEWS2 分数计数
+        if 'NEWS2 score' in group.columns:
+            news2_counts[period_key] = group['NEWS2 score'].value_counts().sort_index()
+        
+        # 高风险比例 (NEWS2 >= 6)
+        if 'NEWS2 score' in group.columns:
+            high_risk_prop[period_key] = (group['NEWS2 score'] >= 6).mean()
+        
+        # Clinical concern 比例
+        if 'Clinical concern?' in group.columns:
+            concern_prop[period_key] = (group['Clinical concern?'] == 'Yes').mean()
+        
+        # Clinical judgement 准确率
+        if 'Clinical concern?' in group.columns and 'NEWS2 score' in group.columns:
+            concern_data = group[group['Clinical concern?'] == 'Yes']
+            if len(concern_data) > 0:
+                judgement_accuracy[period_key] = (concern_data['NEWS2 score'] >= 6).mean()
+            else:
+                judgement_accuracy[period_key] = 0
+    
+    return {
+        'news2_counts': pd.DataFrame(news2_counts).T.sort_index(),
+        'high_risk_prop': pd.Series(high_risk_prop).sort_index(),
+        'concern_prop': pd.Series(concern_prop).sort_index(),
+        'judgement_accuracy': pd.Series(judgement_accuracy).sort_index()
+    }
 
+def predict_next_month_bayesian(df_carehome, window_length=2, sigma=0.5):
+    """
+    使用PyMC进行贝叶斯时间序列预测.
+    :param df_carehome: 单个 care home 的 DataFrame.
+    :param window_length: 用于计算先验的移动平均窗口.
+    :param sigma: 先验的离散程度.
+    :return: 包含预测结果的 DataFrame 和目标月份字符串.
+    """
+    if df_carehome.empty or 'NEWS2 score' not in df_carehome.columns:
+        return pd.DataFrame(), None
+
+    df_ch = df_carehome.copy()
+    df_ch['Date/Time'] = pd.to_datetime(df_ch['Date/Time'])
+    df_ch = df_ch.dropna(subset=['Date/Time'])
+    df_ch['Month'] = df_ch['Date/Time'].dt.to_period('M')
+    
+    monthly_counts = df_ch.groupby(['Month', 'NEWS2 score']).size().unstack(fill_value=0)
+    
+    if len(monthly_counts) < window_length:
+        # 如果数据不足，无法进行预测
+        return pd.DataFrame(), None
+
+    months = monthly_counts.index.to_timestamp()
+    target_month_period = months[-1].to_period('M') + 1
+    target_month_str = target_month_period.strftime('%Y-%m')
+    
+    # 使用最后 `window_length` 个月的数据作为训练集
+    train_months = months[-(window_length):]
+    train_counts = monthly_counts[monthly_counts.index.to_timestamp().isin(train_months)]
+
+    results = []
+    score_list = sorted(list(range(0, 11))) # NEWS2 scores 0-10
+
+    for score in score_list:
+        if score not in train_counts.columns:
+            # 如果历史数据中没有这个分数，我们仍然可以基于0计数进行预测
+            y_train = np.zeros(window_length)
+        else:
+            y_train = train_counts[score].values
+        
+        # 将移动平均值作为先验
+        prior_mean = np.mean(y_train)
+        prior_logmu = np.log(prior_mean + 1e-5) # 避免log(0)
+
+        with pm.Model() as model:
+            # 定义先验
+            lam_pred = pm.Lognormal("lam_pred", mu=prior_logmu, sigma=sigma)
+            # 定义似然
+            pm.Poisson("obs", mu=lam_pred, observed=y_train)
+            # 运行MCMC采样
+            with open('/dev/null', 'w') as f: # Mute progress bar
+                trace = pm.sample(2000, tune=1000, target_accept=0.95, progressbar=False, cores=1)
+
+        # 从后验分布中获取预测
+        posterior_lam = trace.posterior["lam_pred"].values
+        
+        # 使用泊松分布从后验lambda生成预测计数
+        pred_counts = np.random.poisson(posterior_lam)
+
+        results.append({
+            'NEWS2 Score': score,
+            'Predicted Mean': np.mean(pred_counts),
+            '95% Lower': np.percentile(pred_counts, 2.5),
+            '95% Upper': np.percentile(pred_counts, 97.5)
+        })
+        
+    result_df = pd.DataFrame(results)
+    return result_df, target_month_str
+
+# 绘图函数
 def plot_usage_counts(df, period):
+    """绘制使用次数图"""
+    if df.empty:
+        return go.Figure()
+    
     fig = go.Figure()
-    fig.add_trace(go.Bar(x=df['Date'], y=df['count'], name='Device Usage'))
-    fig.update_layout(title=f'{period} Device Usage Counts', xaxis_title='Date', yaxis_title='Count')
+    fig.add_trace(go.Scatter(
+        x=df['Date'], 
+        y=df['Count'],
+        mode='lines+markers',
+        name='Usage Count'
+    ))
+    fig.update_layout(
+        title=f'Usage Count ({period})',
+        xaxis_title='Date',
+        yaxis_title='Count'
+    )
     return fig
 
 def plot_usage_per_bed(df, period):
+    """绘制每床位使用率图"""
+    if df.empty:
+        return go.Figure()
+    
     fig = go.Figure()
-    fig.add_trace(go.Scatter(x=df['Date'], y=df['usage_per_bed'], mode='lines+markers', name='Usage per Bed'))
-    fig.update_layout(title=f'{period} Device Usage per Bed', xaxis_title='Date', yaxis_title='Usage / Bed')
+    fig.add_trace(go.Scatter(
+        x=df['Date'], 
+        y=df['Usage_per_bed'],
+        mode='lines+markers',
+        name='Usage per Bed'
+    ))
+    fig.update_layout(
+        title=f'Usage per Bed ({period})',
+        xaxis_title='Date',
+        yaxis_title='Usage per Bed'
+    )
     return fig
 
 def plot_coverage(df):
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(x=df['month'], y=df['coverage'], mode='lines+markers', name='Coverage %'))
-    fig.update_layout(title='Monthly Bed Coverage Percentage', xaxis_title='Month', yaxis_title='Coverage (%)', yaxis=dict(range=[0, 100]))
-    return fig
-
-def plot_news2_counts(df, period):
-    fig = go.Figure()
-    fig.add_trace(go.Bar(x=df['Date'], y=df['total_readings'], name='Total Readings'))
-    fig.update_layout(title=f'{period} NEWS2 Score Readings', xaxis_title='Date', yaxis_title='Count')
-    return fig
-
-def plot_high_risk_prop(df, period):
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(x=df['Date'], y=df['high_risk_prop'], mode='lines', name='High Risk Proportion'))
-    fig.update_layout(title=f'{period} Proportion of High Risk Readings (Score >= 6)', xaxis_title='Date', yaxis_title='Proportion', yaxis=dict(tickformat=".0%"))
-    return fig
-
-def plot_concern_prop(df, period):
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(x=df['Date'], y=df['concern_prop'], mode='lines', name='Concern Proportion'))
-    fig.update_layout(title=f'{period} Proportion of Concern Readings (Score 3-5)', xaxis_title='Date', yaxis_title='Proportion', yaxis=dict(tickformat=".0%"))
-    return fig
-
-def plot_judgement_accuracy(df, period):
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(x=df['Date'], y=df['accuracy'], mode='lines+markers', name='Judgement Accuracy'))
-    fig.update_layout(title=f'{period} Clinical Judgement Accuracy', xaxis_title='Date', yaxis_title='Accuracy', yaxis=dict(tickformat=".0%"))
-    return fig
-
-def plot_high_score_params(df, period):
-    param_cols = ['Respiration', 'Oxygen Saturation', 'Supplemental Oxygen', 'Temperature', 'Blood Pressure', 'Heart Rate', 'Consciousness']
-    fig = go.Figure()
-    for col in param_cols:
-        if col in df.columns:
-            fig.add_trace(go.Bar(x=df['Date'], y=df[col], name=col))
-    fig.update_layout(barmode='stack', title=f'{period} Contributing Parameters for High Scores', xaxis_title='Date', yaxis_title='Count of Abnormal Readings')
-    return fig
-
-def predict_next_month_bayesian(df, care_home_id):
-    ch_df = df[df['Care Home ID'] == care_home_id].copy()
-    ch_df['Date'] = pd.to_datetime(ch_df['Date'])
+    """绘制覆盖率图"""
+    if df.empty or 'coverage' not in df.columns:
+        return go.Figure()
     
-    if len(ch_df) < 3:
-        return None
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=df['Date'], 
+        y=df['coverage'] * 100,
+        mode='lines+markers',
+        name='Coverage %'
+    ))
+    fig.update_layout(
+        title='Monthly Coverage %',
+        xaxis_title='Date',
+        yaxis_title='Coverage %'
+    )
+    return fig
 
-    monthly_counts = ch_df.groupby([pd.Grouper(key='Date', freq='M'), 'NEWS2 Score']).size().unstack(fill_value=0)
+def plot_news2_counts(hi_data, period):
+    """绘制 NEWS2 计数图"""
+    if 'news2_counts' not in hi_data or hi_data['news2_counts'].empty:
+        return go.Figure()
     
-    if len(monthly_counts) < 3:
-        return None
+    df = hi_data['news2_counts']
+    fig = go.Figure()
+    
+    for score in df.columns:
+        fig.add_trace(go.Scatter(
+            x=df.index,
+            y=df[score],
+            mode='lines+markers',
+            name=f'NEWS2 Score {score}'
+        ))
+    
+    fig.update_layout(
+        title=f'NEWS2 Score Counts ({period})',
+        xaxis_title='Date',
+        yaxis_title='Count'
+    )
+    return fig
 
-    predictions = []
-    for score_col in monthly_counts.columns:
-        y = monthly_counts[score_col].values
-        
-        with pm.Model() as model:
-            alpha = pm.HalfCauchy('alpha', beta=10)
-            mu = pm.Gamma('mu', alpha=1.0, beta=1.0)
-            
-            y_pred = pm.NegativeBinomial('y_pred', mu=mu, alpha=alpha, observed=y)
-            
-            trace = pm.sample(2000, tune=1000, cores=1, progressbar=False, return_inferencedata=True)
-            
-            with model:
-                posterior_pred = pm.sample_posterior_predictive(trace, random_seed=42)
+def plot_high_risk_prop(hi_data, period):
+    """绘制高风险比例图"""
+    if 'high_risk_prop' not in hi_data or hi_data['high_risk_prop'].empty:
+        return go.Figure()
+    
+    df = hi_data['high_risk_prop']
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=df.index,
+        y=df.values * 100,
+        mode='lines+markers',
+        name='High Risk %'
+    ))
+    fig.update_layout(
+        title=f'High Risk Proportion ({period})',
+        xaxis_title='Date',
+        yaxis_title='Percentage'
+    )
+    return fig
 
-            next_month_samples = posterior_pred.posterior_predictive["y_pred"].values.flatten()
-            
-            mean_pred = np.mean(next_month_samples)
-            hdi = az.hdi(next_month_samples, hdi_prob=0.94)
+def plot_concern_prop(hi_data, period):
+    """绘制关注比例图"""
+    if 'concern_prop' not in hi_data or hi_data['concern_prop'].empty:
+        return go.Figure()
+    
+    df = hi_data['concern_prop']
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=df.index,
+        y=df.values * 100,
+        mode='lines+markers',
+        name='Clinical Concern %'
+    ))
+    fig.update_layout(
+        title=f'Clinical Concern Proportion ({period})',
+        xaxis_title='Date',
+        yaxis_title='Percentage'
+    )
+    return fig
 
-            predictions.append({
-                'NEWS2 Score': score_col,
-                'predicted_mean': mean_pred,
-                'hdi_94%_lower': hdi.x.data[0],
-                'hdi_94%_upper': hdi.x.data[1]
-            })
-            
-    return pd.DataFrame(predictions)
+def plot_judgement_accuracy(hi_data, period):
+    """绘制判断准确率图"""
+    if 'judgement_accuracy' not in hi_data or hi_data['judgement_accuracy'].empty:
+        return go.Figure()
+    
+    df = hi_data['judgement_accuracy']
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=df.index,
+        y=df.values * 100,
+        mode='lines+markers',
+        name='Judgement Accuracy %'
+    ))
+    fig.update_layout(
+        title=f'Clinical Judgement Accuracy ({period})',
+        xaxis_title='Date',
+        yaxis_title='Percentage'
+    )
+    return fig
+
+def plot_high_score_params(hi_data, period):
+    """绘制高分参数图"""
+    # 简化版本，返回空图
+    fig = go.Figure()
+    fig.update_layout(
+        title=f'High Score Parameters ({period})',
+        xaxis_title='Parameter',
+        yaxis_title='Value'
+    )
+    return fig
 
 def calculate_benchmark_data(df):
     """
-    Calculates high-risk event statistics for all care homes.
-    Handles cases with zero high-risk events gracefully.
+    计算所有护理院的每月每床使用量，进行基准分组，并计算地理分布统计。
+    :param df: 包含所有观测数据的完整 DataFrame。
+    :return: 一个包含基准分析结果的 DataFrame。
     """
+    if df is None or df.empty:
+        return pd.DataFrame()
+
+    # 确保数据类型正确
     df_copy = df.copy()
-    df_copy['Date'] = pd.to_datetime(df_copy['Date'])
-    df_copy['Month'] = df_copy['Date'].dt.to_period('M').astype(str)
+    df_copy['Date/Time'] = pd.to_datetime(df_copy['Date/Time'])
+    df_copy['Month'] = df_copy['Date/Time'].dt.strftime('%Y-%m')
 
-    details_df = df_copy[df_copy['NEWS2 Score'] >= 6].copy()
-    if not details_df.empty:
-        details_df = details_df.groupby(['Care Home Name', 'Month', 'NEWS2 Score']).size().reset_index(name='count')
-    else:
-        details_df = pd.DataFrame(columns=['Care Home Name', 'Month', 'NEWS2 Score', 'count'])
+    # 1. 获取每家护理院的床位数
+    # 假设床位数在数据中对于每个护理院是固定的
+    beds_info = df_copy.drop_duplicates(subset=['Care Home ID']).set_index('Care Home ID')['No of Beds']
 
-    all_homes = df_copy[['Care Home ID', 'Care Home Name', 'Latitude', 'Longitude']].drop_duplicates().set_index('Care Home Name')
+    # 2. 计算每家护理院每月的观测总数
+    monthly_counts = df_copy.groupby(['Care Home ID', 'Care Home Name', 'Month']).size().reset_index(name='Monthly Observations')
 
-    if not details_df.empty:
-        ci = details_df.groupby('Care Home Name')['Month'].nunique().reset_index(name='ci')
-        total_months = df_copy.groupby('Care Home Name')['Month'].nunique().reset_index(name='total_months')
-        summary_df = pd.merge(ci, total_months, on='Care Home Name', how='right')
-        summary_df['ci'] = summary_df['ci'].fillna(0)
-        summary_df['pi'] = (summary_df['ci'] / summary_df['total_months']).fillna(0)
-    else:
-        total_months = df_copy.groupby('Care Home Name')['Month'].nunique().reset_index(name='total_months')
-        summary_df = total_months
-        summary_df['ci'] = 0
-        summary_df['pi'] = 0.0
-
-    summary_df['rank'] = summary_df['pi'].rank(method='min', ascending=False).astype(int)
+    # 3. 合并床位数信息
+    benchmark_df = pd.merge(monthly_counts, beds_info, on='Care Home ID')
     
-    summary_df = summary_df.set_index('Care Home Name').join(all_homes).reset_index()
+    # 过滤掉床位数为0或无效的情况，防止除零错误
+    benchmark_df = benchmark_df[benchmark_df['No of Beds'] > 0]
 
-    return summary_df.sort_values('rank'), details_df
+    # 4. 计算核心指标：平均每床使用量
+    benchmark_df['Usage per Bed'] = benchmark_df['Monthly Observations'] / benchmark_df['No of Beds']
+    
+    # 5. 计算每个月的四分位数 (Q1, Q3)
+    # 我们使用 transform 将每个月的Q1, Q3值广播到该月的所有行
+    quartiles = benchmark_df.groupby('Month')['Usage per Bed'].quantile([0.25, 0.75]).unstack()
+    quartiles.columns = ['Q1', 'Q3']
+    
+    # 将分位数合并回主表
+    benchmark_df = pd.merge(benchmark_df, quartiles, on='Month', how='left')
+
+    # 6. 根据分位数进行分组
+    conditions = [
+        benchmark_df['Usage per Bed'] >= benchmark_df['Q3'],
+        benchmark_df['Usage per Bed'] <= benchmark_df['Q1']
+    ]
+    choices = ['High', 'Low']
+    benchmark_df['Group'] = np.select(conditions, choices, default='Medium')
+    
+    group_map = {'Low': 0, 'Medium': 1, 'High': 2}
+    benchmark_df['Group Value'] = benchmark_df['Group'].map(group_map)
+
+    # 7. 统计每个 care home 的高使用月次数 (ci) 和总有效月份数
+    # is_high 是一个布尔序列，标记每个月是否为 'High'
+    benchmark_df['is_high'] = (benchmark_df['Group'] == 'High').astype(int)
+    
+    # 按 care home 分组计算
+    geo_stats = benchmark_df.groupby('Care Home ID').agg(
+        ci=('is_high', 'sum'),
+        total_months=('Month', 'count')
+    ).reset_index()
+
+    # 8. 计算高使用月占比 (pi)
+    geo_stats['pi'] = geo_stats['ci'] / geo_stats['total_months']
+    
+    # 9. 计算排名 (Rank)
+    geo_stats['Rank'] = geo_stats['pi'].rank(method='min', ascending=False).astype(int)
+    
+    # 10. 将地理统计数据合并回主 benchmark_df
+    # 我们需要一个包含每个 care home 唯一信息的新表
+    care_home_info = benchmark_df.drop_duplicates(subset='Care Home ID').copy()
+    
+    # 合并 ci, pi, Rank
+    final_benchmark_df = pd.merge(care_home_info, geo_stats, on='Care Home ID')
+
+    # 11. 如果存在经纬度，则一并处理
+    if 'Latitude' in df.columns and 'Longitude' in df.columns:
+        lat_lon = df.drop_duplicates(subset='Care Home ID')[['Care Home ID', 'Latitude', 'Longitude']]
+        final_benchmark_df = pd.merge(final_benchmark_df, lat_lon, on='Care Home ID')
+
+    return final_benchmark_df.sort_values(by='Rank').reset_index(drop=True)
+
+def geocode_uk_postcodes(df, postcode_column='Post Code'):
+    """
+    Generates 'Latitude' and 'Longitude' from a UK postcode column if they don't exist
+    or are null. It operates on a copy and returns the modified DataFrame.
+    """
+    if postcode_column not in df.columns:
+        return df
+
+    df_copy = df.copy()
+
+    # Determine which rows need geocoding
+    if 'Latitude' in df_copy.columns and 'Longitude' in df_copy.columns:
+        # Ensure lat/lon are numeric, coercing errors to NaN
+        df_copy['Latitude'] = pd.to_numeric(df_copy['Latitude'], errors='coerce')
+        df_copy['Longitude'] = pd.to_numeric(df_copy['Longitude'], errors='coerce')
+        rows_to_geocode_mask = df_copy['Latitude'].isnull() | df_copy['Longitude'].isnull()
+    else:
+        rows_to_geocode_mask = pd.Series([True] * len(df_copy), index=df_copy.index)
+        df_copy['Latitude'] = np.nan
+        df_copy['Longitude'] = np.nan
+
+    if not rows_to_geocode_mask.any():
+        return df_copy # Nothing to do
+
+    postcodes_to_query = df_copy.loc[rows_to_geocode_mask, postcode_column].astype(str).str.upper().str.strip()
+    
+    # Filter out empty or invalid postcode strings before querying
+    valid_postcodes = postcodes_to_query.dropna()
+    valid_postcodes = valid_postcodes[valid_postcodes.str.len() > 3] # Basic validation
+    valid_postcodes = valid_postcodes[valid_postcodes != 'NAN']
+
+    if valid_postcodes.empty:
+        return df_copy
+
+    nomi = pgeocode.Nominatim('gb')
+    geo_data = nomi.query_postal_code(valid_postcodes.tolist())
+
+    # Create Series for latitude and longitude with the correct index to align them
+    latitudes = pd.Series(geo_data['latitude'].values, index=valid_postcodes.index)
+    longitudes = pd.Series(geo_data['longitude'].values, index=valid_postcodes.index)
+    
+    # Use the generated coordinates to fill NaNs in the respective rows
+    # The .loc accessor is important for safe assignment
+    df_copy['Latitude'] = df_copy['Latitude'].fillna(latitudes)
+    df_copy['Longitude'] = df_copy['Longitude'].fillna(longitudes)
+    
+    return df_copy
