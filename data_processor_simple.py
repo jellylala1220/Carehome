@@ -34,15 +34,17 @@ def geocode_uk_postcodes(df, postcode_column='Post Code'):
         nomi = pgeocode.Nominatim('gb')
         geo_data = nomi.query_postal_code(list(unique_postcodes))
         
-        geo_data = geo_data[['postal_code', 'latitude', 'longitude']].set_index('postal_code')
+        # --- FIX: Prevent Reindexing Error ---
+        # 1. Drop rows where postal_code is NaN or duplicated to ensure a unique index.
+        geo_data.dropna(subset=['postal_code'], inplace=True)
+        geo_data.drop_duplicates(subset=['postal_code'], inplace=True)
         
-        # --- FIX: Use Series.map to avoid duplicate label error ---
-        # Create a map from postcode to lat/lon
+        # 2. Now it's safe to set the index.
+        geo_data = geo_data.set_index('postal_code')
+        
+        # 3. Create maps and fill NaN values in the original DataFrame.
         lat_map = geo_data['latitude']
         lon_map = geo_data['longitude']
-
-        # Fill the NaN values in the original DataFrame using the map
-        # This is the correct way to handle lookups with potentially duplicate keys
         df_copy['Latitude'] = df_copy['Latitude'].combine_first(df_copy[postcode_column].map(lat_map))
         df_copy['Longitude'] = df_copy['Longitude'].combine_first(df_copy[postcode_column].map(lon_map))
         # --- END FIX ---
@@ -220,13 +222,16 @@ def predict_next_month_bayesian(df, care_home_id):
             
             trace = pm.sample(2000, tune=1000, cores=1, progressbar=False, return_inferencedata=True)
             
+            # --- FIX: More robust prediction sampling ---
             with model:
-                posterior_pred = pm.sample_posterior_predictive(trace, var_names=['y_pred'], random_seed=42)
+                posterior_pred = pm.sample_posterior_predictive(trace, random_seed=42)
 
-            next_month_pred_dist = posterior_pred.posterior_predictive['y_pred'].sel(chain=0)
+            # Flatten all generated samples to get the full predictive distribution for a future month.
+            next_month_samples = posterior_pred.posterior_predictive["y_pred"].values.flatten()
             
-            mean_pred = next_month_pred_dist.mean().item()
-            hdi = az.hdi(next_month_pred_dist, hdi_prob=0.94)
+            mean_pred = np.mean(next_month_samples)
+            hdi = az.hdi(next_month_samples, hdi_prob=0.94)
+            # --- END FIX ---
 
             predictions.append({
                 'NEWS2 Score': score_col,
