@@ -262,66 +262,24 @@ def plot_usage_per_bed(df, period):
     return fig
 
 def plot_coverage(df):
-    """绘制覆盖率图"""
-    if df.empty or 'coverage' not in df.columns:
-        return go.Figure()
-    
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(
-        x=df['Date'], 
-        y=df['coverage'] * 100,
-        mode='lines+markers',
-        name='Coverage %'
-    ))
-    fig.update_layout(
-        title='Monthly Coverage %',
-        xaxis_title='Date',
-        yaxis_title='Coverage %'
-    )
-    return fig
+    if df.empty: return go.Figure()
+    return px.bar(df, x='Date', y='coverage', title='Monthly Observation Coverage', labels={'coverage': 'Coverage %'})
 
 def plot_news2_counts(hi_data, period):
-    """绘制 NEWS2 计数图"""
-    if 'news2_counts' not in hi_data or hi_data['news2_counts'].empty:
+    # 修复: 恢复并优化此函数以正确处理数据
+    if 'news2_counts' not in hi_data or hi_data['news2_counts'].empty: 
         return go.Figure()
     
-    df = hi_data['news2_counts']
-    fig = go.Figure()
-    
-    for score in df.columns:
-        fig.add_trace(go.Scatter(
-            x=df.index,
-            y=df[score],
-            mode='lines+markers',
-            name=f'NEWS2 Score {score}'
-        ))
-    
-    fig.update_layout(
-        title=f'NEWS2 Score Counts ({period})',
-        xaxis_title='Date',
-        yaxis_title='Count'
-    )
-    return fig
+    # 将宽格式数据转换为长格式，以便绘图
+    df_to_plot = hi_data['news2_counts'].copy()
+    df_to_plot = df_to_plot.unstack().reset_index()
+    df_to_plot.columns = ['NEWS2 Score', 'Date', 'Count']
+
+    return px.bar(df_to_plot, x='Date', y='Count', color='NEWS2 Score', title=f'NEWS2 Score Counts ({period})', barmode='stack')
 
 def plot_high_risk_prop(hi_data, period):
-    """绘制高风险比例图"""
-    if 'high_risk_prop' not in hi_data or hi_data['high_risk_prop'].empty:
-        return go.Figure()
-    
-    df = hi_data['high_risk_prop']
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(
-        x=df.index,
-        y=df.values * 100,
-        mode='lines+markers',
-        name='High Risk %'
-    ))
-    fig.update_layout(
-        title=f'High Risk Proportion ({period})',
-        xaxis_title='Date',
-        yaxis_title='Percentage'
-    )
-    return fig
+    if 'high_risk_prop' not in hi_data or hi_data['high_risk_prop'].empty: return go.Figure()
+    return px.line(hi_data['high_risk_prop'], title=f'High-Risk Proportion (NEWS2 >= 6) ({period})', markers=True)
 
 def plot_concern_prop(hi_data, period):
     """绘制关注比例图"""

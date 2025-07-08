@@ -71,13 +71,22 @@ if step_title == "Upload Data":
             st.success("File uploaded and processed successfully! You can now navigate to other sections.")
             
             # Data overview
+            st.subheader("Data Overview")
+            df = st.session_state.get('df')
             carehome_counts = df['Care Home ID'].value_counts()
             id_to_name = df.drop_duplicates('Care Home ID').set_index('Care Home ID')['Care Home Name'].astype(str).to_dict()
             table = carehome_counts.reset_index()
             table.columns = ['Care Home ID', 'Count']
             table['Care Home Name'] = table['Care Home ID'].map(id_to_name)
             table['Percentage'] = (table['Count'] / carehome_counts.sum()) * 100
-            st.dataframe(table[['Care Home ID', 'Care Home Name', 'Count', 'Percentage']].style.format({'Percentage': '{:.1f}%'}), use_container_width=True)
+            
+            # 修复: 动态计算表格高度，使其自适应
+            table_height = min(500, (len(table) + 1) * 35 + 3) # 每行35像素，最多500像素
+            st.dataframe(
+                table[['Care Home ID', 'Care Home Name', 'Count', 'Percentage']].style.format({'Percentage': '{:.1f}%'}), 
+                use_container_width=True,
+                height=table_height
+            )
 
         except Exception as e:
             st.error(f"Error processing file: {e}")
@@ -214,6 +223,8 @@ elif step_title == "Prediction Visualization":
                     )
 
                 if selected_ch_id != "All":
+                    # --- Single Care Home Time Series View ---
+                    st.info(f"Showing full history and prediction for: {ch_map.get(selected_ch_id)}")
                     ch_hist = hist_counts[hist_counts['Care Home ID'] == selected_ch_id]
                     ch_pred = pred_df[pred_df['Care Home ID'] == selected_ch_id]
                     if not ch_pred.empty:
@@ -226,23 +237,31 @@ elif step_title == "Prediction Visualization":
                         fig.update_layout(title=f"History vs. Prediction for {ch_map.get(selected_ch_id)}", yaxis_title="Observation Count")
                         st.plotly_chart(fig, use_container_width=True)
                 else:
-                    pred_filtered = pred_df[pred_df['NEWS2 Score'] == selected_score].copy()
+                    # --- All Care Homes, Single Score Comparison View ---
+                    st.subheader(f"Comparing predictions for NEWS2 Score = {selected_score}")
+                    pred_filtered = pred_df[pred_df['NEWS2 Score'] == selected_score]
+                    
                     if not hist_counts.empty:
                         last_month = hist_counts['Month'].max()
                         hist_filtered = hist_counts[(hist_counts['NEWS2 Score'] == selected_score) & (hist_counts['Month'] == last_month)]
+                        
+                        # 修复: 在合并前，强制将ID列转换为同一类型(str)
+                        pred_filtered['Care Home ID'] = pred_filtered['Care Home ID'].astype(str)
+                        hist_filtered['Care Home ID'] = hist_filtered['Care Home ID'].astype(str)
+
                         comp_df = pd.merge(pred_filtered, hist_filtered[['Care Home ID', 'Count']], on="Care Home ID", how='left').fillna(0)
                         comp_df.rename(columns={'Count': 'Last Month Actual'}, inplace=True)
                     else:
-                        comp_df = pred_filtered
+                        comp_df = pred_filtered.copy()
                         comp_df['Last Month Actual'] = 0
                         last_month = "N/A"
                     
                     if not comp_df.empty:
-                        fig_bar = go.Figure()
-                        fig_bar.add_trace(go.Bar(x=comp_df['Care Home Name'], y=comp_df['Last Month Actual'], name=f'Actual Count (Month: {last_month})'))
-                        fig_bar.add_trace(go.Bar(x=comp_df['Care Home Name'], y=comp_df['Predicted Mean'], name='Predicted Mean (Next Month)', error_y=dict(type='data', symmetric=False, array=comp_df['95% Upper'] - comp_df['Predicted Mean'], arrayminus=comp_df['Predicted Mean'] - comp_df['95% Lower'])))
-                        fig_bar.update_layout(barmode='group', title=f"Actual vs. Predicted Counts for Score {selected_score}")
-                        st.plotly_chart(fig_bar, use_container_width=True)
+                        fig = go.Figure()
+                        fig.add_trace(go.Bar(x=comp_df['Care Home Name'], y=comp_df['Last Month Actual'], name=f'Actual Count (Month: {last_month})'))
+                        fig.add_trace(go.Bar(x=comp_df['Care Home Name'], y=comp_df['Predicted Mean'], name='Predicted Mean (Next Month)', error_y=dict(type='data', symmetric=False, array=comp_df['95% Upper'] - comp_df['Predicted Mean'], arrayminus=comp_df['Predicted Mean'] - comp_df['95% Lower'])))
+                        fig.update_layout(barmode='group', title=f"Actual vs. Predicted Counts for Score {selected_score}")
+                        st.plotly_chart(fig, use_container_width=True)
 
             except Exception as e:
                 st.error(f"Failed to process prediction file: {e}")
