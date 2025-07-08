@@ -455,42 +455,44 @@ def calculate_benchmark_data(df):
 
 def get_monthly_regional_benchmark_data(df):
     """
-    Prepares a monthly, per-care-home dataframe for regional analysis.
-    This function calculates 'Usage per Bed' and assigns a benchmark 'Group'
-    for each care home for each month.
+    为区域分析准备月度基准数据。
+    此函数现在使用 'Area' 列进行分组。
     """
-    if df is None or df.empty or 'Region' not in df.columns or 'No of Beds' not in df.columns:
+    if 'Date/Time' not in df.columns or 'No of Beds' not in df.columns or 'Area' not in df.columns:
         return pd.DataFrame()
 
     df_copy = df.copy()
     df_copy['Date/Time'] = pd.to_datetime(df_copy['Date/Time'])
     df_copy['Month'] = df_copy['Date/Time'].dt.strftime('%Y-%m')
 
-    ch_info = df_copy.drop_duplicates(subset=['Care Home ID'])[['Care Home ID', 'No of Beds', 'Region']]
-
-    monthly_counts = df_copy.groupby(['Care Home ID', 'Care Home Name', 'Month']).size().reset_index(name='Monthly Observations')
-
-    monthly_df = pd.merge(monthly_counts, ch_info, on='Care Home ID')
-    
+    # 1. 计算每个 care home 每月的每床使用量
+    beds_info = df_copy.drop_duplicates(subset=['Care Home ID']).set_index('Care Home ID')['No of Beds']
+    monthly_counts = df_copy.groupby(['Care Home ID', 'Care Home Name', 'Area', 'Month']).size().reset_index(name='Monthly Observations')
+    monthly_df = pd.merge(monthly_counts, beds_info, on='Care Home ID')
     monthly_df = monthly_df[monthly_df['No of Beds'] > 0]
-    if monthly_df.empty:
-        return pd.DataFrame()
-
     monthly_df['Usage per Bed'] = monthly_df['Monthly Observations'] / monthly_df['No of Beds']
     
+    # 2. 基于整体数据计算每月的Q1, Q3分位数
     quartiles = monthly_df.groupby('Month')['Usage per Bed'].quantile([0.25, 0.75]).unstack()
     quartiles.columns = ['Q1', 'Q3']
     
+    # 3. 合并分位数并确定分组
     monthly_df = pd.merge(monthly_df, quartiles, on='Month', how='left')
-
     conditions = [
         monthly_df['Usage per Bed'] >= monthly_df['Q3'],
         monthly_df['Usage per Bed'] <= monthly_df['Q1']
     ]
     choices = ['High', 'Low']
     monthly_df['Group'] = np.select(conditions, choices, default='Medium')
-
-    return monthly_df
+    
+    # 确保列存在
+    final_cols = ['Month', 'Area', 'Care Home ID', 'Care Home Name', 'Usage per Bed', 'Group']
+    for col in final_cols:
+        if col not in monthly_df.columns:
+            # 如果关键列丢失，返回空DF以避免下游错误
+            return pd.DataFrame()
+            
+    return monthly_df[final_cols]
 
 def geocode_uk_postcodes(df, postcode_column='Post Code'):
     """
