@@ -13,7 +13,7 @@ def geocode_uk_postcodes(df, postcode_column='Post Code'):
     """
     Generates 'Latitude' and 'Longitude' from a UK postcode column if they don't exist
     or are null. It operates on a copy and returns the modified DataFrame and a report.
-    Uses the latest pgeocode API.
+    Uses the latest pgeocode API and safely handles duplicate postcodes.
     """
     if postcode_column not in df.columns:
         return df, {"added": 0, "updated": 0, "failed": 0}
@@ -28,37 +28,33 @@ def geocode_uk_postcodes(df, postcode_column='Post Code'):
     df_copy['Latitude'] = pd.to_numeric(df_copy['Latitude'], errors='coerce')
     df_copy['Longitude'] = pd.to_numeric(df_copy['Longitude'], errors='coerce')
 
-    # --- FIX: Use the latest pgeocode API ---
-    # We directly query all unique non-null postcodes at once
     unique_postcodes = df_copy[postcode_column].dropna().unique()
     
     if len(unique_postcodes) > 0:
         nomi = pgeocode.Nominatim('gb')
-        # The query_postal_code method handles lists of postcodes
         geo_data = nomi.query_postal_code(list(unique_postcodes))
         
-        # We only need the columns for merging
         geo_data = geo_data[['postal_code', 'latitude', 'longitude']].set_index('postal_code')
         
-        # Map the results back to the original dataframe
-        df_copy = df_copy.set_index(postcode_column)
-        
-        # Use combine_first to fill NaNs in original with new data
-        df_copy['Latitude'] = df_copy['Latitude'].combine_first(geo_data['latitude'])
-        df_copy['Longitude'] = df_copy['Longitude'].combine_first(geo_data['longitude'])
-        
-        df_copy = df_copy.reset_index()
+        # --- FIX: Use Series.map to avoid duplicate label error ---
+        # Create a map from postcode to lat/lon
+        lat_map = geo_data['latitude']
+        lon_map = geo_data['longitude']
 
-    # Reporting logic can be simplified as we process all at once
-    original_nan_count = df['Latitude'].isnull().sum()
+        # Fill the NaN values in the original DataFrame using the map
+        # This is the correct way to handle lookups with potentially duplicate keys
+        df_copy['Latitude'] = df_copy['Latitude'].combine_first(df_copy[postcode_column].map(lat_map))
+        df_copy['Longitude'] = df_copy['Longitude'].combine_first(df_copy[postcode_column].map(lon_map))
+        # --- END FIX ---
+
+    original_nan_count = df['Latitude'].isnull().sum() if 'Latitude' in df.columns else len(df)
     final_nan_count = df_copy['Latitude'].isnull().sum()
     
     report = {
         "added": int(original_nan_count - final_nan_count),
-        "updated": 0, # This logic is simpler now, focusing on adding missing data
+        "updated": 0,
         "failed": int(final_nan_count)
     }
-    # --- END FIX ---
 
     return df_copy, report
     
