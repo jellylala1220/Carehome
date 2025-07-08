@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 from data_processor_simple import (
-    get_care_home_list, get_care_home_info,
+    get_care_home_list, get_care_home_info, 
     process_usage_data, process_health_insights,
     plot_usage_counts, plot_usage_per_bed, plot_coverage,
     plot_news2_counts, plot_high_risk_prop, plot_concern_prop,
@@ -49,7 +49,7 @@ with st.sidebar:
 # Step 1: Upload Data
 # ==============================================================================
 if step_title == "Upload Data":
-    st.title("Care Home Analysis Dashboard")
+st.title("Care Home Analysis Dashboard")
     st.header("Step 1: Upload Data")
 
     main_data_file = st.file_uploader("Upload Observation Data (Excel)", type=["xlsx"])
@@ -67,22 +67,22 @@ if step_title == "Upload Data":
                 with st.spinner("Generating coordinates from 'Post Code'..."):
                     df = geocode_uk_postcodes(df, 'Post Code')
             
-            st.session_state['df'] = df
+    st.session_state['df'] = df
             st.success("File uploaded and processed successfully! You can now navigate to other sections.")
             
             # Data overview
             st.subheader("Data Overview")
             df = st.session_state.get('df')
-            carehome_counts = df['Care Home ID'].value_counts()
+    carehome_counts = df['Care Home ID'].value_counts()
             id_to_name = df.drop_duplicates('Care Home ID').set_index('Care Home ID')['Care Home Name'].astype(str).to_dict()
-            table = carehome_counts.reset_index()
-            table.columns = ['Care Home ID', 'Count']
-            table['Care Home Name'] = table['Care Home ID'].map(id_to_name)
+    table = carehome_counts.reset_index()
+    table.columns = ['Care Home ID', 'Count']
+    table['Care Home Name'] = table['Care Home ID'].map(id_to_name)
             table['Percentage'] = (table['Count'] / carehome_counts.sum()) * 100
             
             # 修复: 动态计算表格高度，使其自适应
             table_height = min(500, (len(table) + 1) * 35 + 3) # 每行35像素，最多500像素
-            st.dataframe(
+    st.dataframe(
                 table[['Care Home ID', 'Care Home Name', 'Count', 'Percentage']].style.format({'Percentage': '{:.1f}%'}), 
                 use_container_width=True,
                 height=table_height
@@ -109,15 +109,15 @@ elif step_title == "Care Home Analysis":
         
         care_home_info = get_care_home_info(df, care_home_id)
         beds = care_home_info.get('beds', 10)
-
+        
         with st.expander("Care Home Basic Information", expanded=True):
             st.markdown(f"**Name:** {care_home_info.get('name', 'N/A')}")
             st.markdown(f"**Number of Beds:** {beds}")
             st.markdown(f"**Number of Observations:** {care_home_info.get('obs_count', 'N/A')}")
             st.markdown(f"**Data Time Range:** {care_home_info.get('date_range', 'N/A')}")
-
+        
         tab1, tab2 = st.tabs(["Usage Analysis", "Health Insights"])
-
+        
         with tab1:
             period = st.selectbox("Time Granularity", ["Daily", "Weekly", "Monthly", "Yearly"], index=2, key="usage_period")
             usage_df = process_usage_data(df, care_home_id, beds, period)
@@ -126,7 +126,7 @@ elif step_title == "Care Home Analysis":
             if period == "Monthly":
                 coverage_df = calculate_coverage_percentage(df[df['Care Home ID'] == care_home_id])
                 st.plotly_chart(plot_coverage(coverage_df), use_container_width=True, key="coverage_chart")
-
+        
         with tab2:
             period2 = st.selectbox("Time Granularity (Health)", ["Daily", "Weekly", "Monthly", "Yearly"], index=2, key="health_period")
             hi_data = process_health_insights(df, care_home_id, period2)
@@ -239,29 +239,47 @@ elif step_title == "Prediction Visualization":
                 else:
                     # --- All Care Homes, Single Score Comparison View ---
                     st.subheader(f"Comparing predictions for NEWS2 Score = {selected_score}")
-                    pred_filtered = pred_df[pred_df['NEWS2 Score'] == selected_score]
+                    # Use .copy() to avoid SettingWithCopyWarning
+                    pred_filtered = pred_df[pred_df['NEWS2 Score'] == selected_score].copy()
                     
                     if not hist_counts.empty:
                         last_month = hist_counts['Month'].max()
-                        hist_filtered = hist_counts[(hist_counts['NEWS2 Score'] == selected_score) & (hist_counts['Month'] == last_month)]
+                        hist_filtered = hist_counts[(hist_counts['NEWS2 Score'] == selected_score) & (hist_counts['Month'] == last_month)].copy()
                         
-                        # 修复: 在合并前，强制将ID列转换为同一类型(str)
+                        # 修复: 在合并前，强制将ID列都转换为字符串类型，这是核心修复
                         pred_filtered['Care Home ID'] = pred_filtered['Care Home ID'].astype(str)
                         hist_filtered['Care Home ID'] = hist_filtered['Care Home ID'].astype(str)
 
-                        comp_df = pd.merge(pred_filtered, hist_filtered[['Care Home ID', 'Count']], on="Care Home ID", how='left').fillna(0)
+                        # 安全地合并
+                        comp_df = pd.merge(pred_filtered, hist_filtered[['Care Home ID', 'Count']], on="Care Home ID", how='left')
+                        # 只对需要的列填充NA，避免污染其他列
+                        comp_df['Count'] = comp_df['Count'].fillna(0)
                         comp_df.rename(columns={'Count': 'Last Month Actual'}, inplace=True)
                     else:
-                        comp_df = pred_filtered.copy()
+                        comp_df = pred_filtered
                         comp_df['Last Month Actual'] = 0
                         last_month = "N/A"
                     
                     if not comp_df.empty:
-                        fig = go.Figure()
-                        fig.add_trace(go.Bar(x=comp_df['Care Home Name'], y=comp_df['Last Month Actual'], name=f'Actual Count (Month: {last_month})'))
-                        fig.add_trace(go.Bar(x=comp_df['Care Home Name'], y=comp_df['Predicted Mean'], name='Predicted Mean (Next Month)', error_y=dict(type='data', symmetric=False, array=comp_df['95% Upper'] - comp_df['Predicted Mean'], arrayminus=comp_df['Predicted Mean'] - comp_df['95% Lower'])))
-                        fig.update_layout(barmode='group', title=f"Actual vs. Predicted Counts for Score {selected_score}")
-                        st.plotly_chart(fig, use_container_width=True)
+                        # 修复: 在绘图前，确保 Care Home Name 是字符串
+                        comp_df['Care Home Name'] = comp_df['Care Home Name'].astype(str)
+                        
+                        fig_bar = go.Figure()
+                        fig_bar.add_trace(go.Bar(
+                            x=comp_df['Care Home Name'],
+                            y=comp_df['Last Month Actual'],
+                            name=f'Actual Count (Month: {last_month})'
+                        ))
+                        fig_bar.add_trace(go.Bar(
+                            x=comp_df['Care Home Name'],
+                            y=comp_df['Predicted Mean'],
+                            name='Predicted Mean (Next Month)',
+                            error_y=dict(type='data', symmetric=False,
+                                         array=comp_df['95% Upper'] - comp_df['Predicted Mean'],
+                                         arrayminus=comp_df['Predicted Mean'] - comp_df['95% Lower'])
+                        ))
+                        fig_bar.update_layout(barmode='group', title=f"Actual vs. Predicted Counts for Score {selected_score}")
+                        st.plotly_chart(fig_bar, use_container_width=True)
 
             except Exception as e:
                 st.error(f"Failed to process prediction file: {e}")
@@ -286,7 +304,7 @@ elif step_title == "Overall Statistics":
                 heatmap_height = max(400, len(heatmap_data.index) * 25)
                 fig_heatmap = px.imshow(heatmap_data, labels=dict(x="Month", y="Care Home", color="High-Risk Events"), color_continuous_scale=px.colors.sequential.Reds, height=heatmap_height)
                 st.plotly_chart(fig_heatmap, use_container_width=True)
-            else:
+    else:
                 st.info("No high-risk events (NEWS2 >= 6) found to generate a heatmap.")
 
             st.subheader("Distribution of NEWS2 Scores by Care Home")
