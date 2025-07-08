@@ -6,9 +6,12 @@ from data_processor_simple import (
     plot_usage_counts, plot_usage_per_bed, plot_coverage,
     plot_news2_counts, plot_high_risk_prop, plot_concern_prop,
     plot_judgement_accuracy, plot_high_score_params,
-    predict_next_month_bayesian
+    predict_next_month_bayesian,
+    calculate_benchmark_data
 )
 import plotly.graph_objects as go
+from io import StringIO
+import numpy as np
 
 st.set_page_config(page_title="Care Home Analysis Dashboard", layout="wide")
 
@@ -19,7 +22,8 @@ step = st.sidebar.radio(
     ["Step 1: Upload Data", 
      "Step 2: Care Home Analysis",
      "Step 3: Batch Prediction (Offline)", 
-     "Step 4: Prediction Visualization"]
+     "Step 4: Prediction Visualization",
+     "Step 5: Overall Statistics/Benchmark Grouping"]
 )
 
 # Initialize session state
@@ -353,6 +357,99 @@ elif step == "Step 4: Prediction Visualization":
                 st.plotly_chart(fig, use_container_width=True)
     elif not upload_pred_file:
         st.info("Awaiting upload of prediction file.")
+
+# Step 5: Overall Statistics/Benchmark Grouping
+elif step == "Step 5: Overall Statistics/Benchmark Grouping":
+    st.title("Care Home Analysis Dashboard")
+    st.header("Step 5: Overall Statistics & Benchmark Grouping")
+
+    if st.session_state['df'] is None:
+        st.warning("Please upload data in Step 1 to begin this analysis.")
+    else:
+        # 计算基准数据
+        benchmark_df = calculate_benchmark_data(st.session_state['df'])
+
+        if benchmark_df.empty:
+            st.info("Not enough data to generate benchmark statistics.")
+        else:
+            # 1. 箱线图 (Boxplot)
+            st.subheader("Monthly Distribution of Usage per Bed")
+            st.markdown("This boxplot shows the distribution of 'average usage per bed' across all care homes for each month.")
+            
+            # 确保月份按时间顺序排列
+            sorted_months = sorted(benchmark_df['Month'].unique())
+            
+            fig_box = px.box(
+                benchmark_df,
+                x='Month',
+                y='Usage per Bed',
+                points='all',
+                category_orders={'Month': sorted_months},
+                labels={'Usage per Bed': 'Average Usage per Bed', 'Month': 'Month'},
+                title='Distribution of Monthly Usage per Bed Across All Care Homes'
+            )
+            st.plotly_chart(fig_box, use_container_width=True)
+
+            # 2. Benchmark Grouping 热力图 (Heatmap)
+            st.subheader("Benchmark Grouping Heatmap")
+            st.markdown("This heatmap classifies each care home's monthly usage into three tiers based on the quartiles of that month's distribution.")
+            st.markdown("- **<span style='color:green;'>High</span>**: Usage ≥ 75th percentile (Q3)\n"
+                        "- **<span style='color:goldenrod;'>Medium</span>**: Usage between 25th (Q1) and 75th (Q3) percentile\n"
+                        "- **<span style='color:red;'>Low</span>**: Usage ≤ 25th percentile (Q1)",
+                        unsafe_allow_html=True)
+
+            # 准备热力图数据
+            heatmap_pivot = benchmark_df.pivot_table(
+                index='Care Home Name',
+                columns='Month',
+                values='Group Value' # 使用我们创建的数值列
+            )
+            # 按月份排序
+            heatmap_pivot = heatmap_pivot[sorted_months]
+            
+            # 自定义颜色方案
+            colorscale = [
+                [0, 'red'],       # Low
+                [0.5, 'yellow'],  # Medium
+                [1, 'green']      # High
+            ]
+
+            fig_heatmap = go.Figure(data=go.Heatmap(
+                z=heatmap_pivot.values,
+                x=heatmap_pivot.columns,
+                y=heatmap_pivot.index,
+                colorscale=colorscale,
+                showscale=True,
+                colorbar=dict(
+                    title='Benchmark Group',
+                    tickvals=[0, 1, 2],
+                    ticktext=['Low', 'Medium', 'High']
+                )
+            ))
+            fig_heatmap.update_layout(
+                title='Care Home Monthly Usage Benchmark',
+                xaxis_title='Month',
+                yaxis_title='Care Home',
+                yaxis_autorange='reversed' # 让列表从上到下显示
+            )
+            st.plotly_chart(fig_heatmap, use_container_width=True)
+
+            # 3. 明细表
+            st.subheader("Detailed Benchmark Data")
+            st.markdown("The complete data used for the charts above. You can download it as a CSV file.")
+            
+            # 为了显示，去掉一些计算用的列
+            display_cols = ['Care Home Name', 'Month', 'Usage per Bed', 'Group']
+            st.dataframe(benchmark_df[display_cols], use_container_width=True)
+
+            # 下载按钮
+            csv = benchmark_df.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                label="Download Detailed Data (.csv)",
+                data=csv,
+                file_name="care_home_benchmark_data.csv",
+                mime="text/csv",
+            )
 
 
 

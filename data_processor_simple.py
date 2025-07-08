@@ -372,3 +372,55 @@ def plot_high_score_params(hi_data, period):
         yaxis_title='Value'
     )
     return fig
+
+def calculate_benchmark_data(df):
+    """
+    计算所有护理院的每月每床使用量，并进行基准分组。
+    :param df: 包含所有观测数据的完整 DataFrame。
+    :return: 一个包含基准分析结果的 DataFrame。
+    """
+    if df is None or df.empty:
+        return pd.DataFrame()
+
+    # 确保数据类型正确
+    df_copy = df.copy()
+    df_copy['Date/Time'] = pd.to_datetime(df_copy['Date/Time'])
+    df_copy['Month'] = df_copy['Date/Time'].dt.strftime('%Y-%m')
+
+    # 1. 获取每家护理院的床位数
+    # 假设床位数在数据中对于每个护理院是固定的
+    beds_info = df_copy.drop_duplicates(subset=['Care Home ID']).set_index('Care Home ID')['No of Beds']
+
+    # 2. 计算每家护理院每月的观测总数
+    monthly_counts = df_copy.groupby(['Care Home ID', 'Care Home Name', 'Month']).size().reset_index(name='Monthly Observations')
+
+    # 3. 合并床位数信息
+    benchmark_df = pd.merge(monthly_counts, beds_info, on='Care Home ID')
+    
+    # 过滤掉床位数为0或无效的情况，防止除零错误
+    benchmark_df = benchmark_df[benchmark_df['No of Beds'] > 0]
+
+    # 4. 计算核心指标：平均每床使用量
+    benchmark_df['Usage per Bed'] = benchmark_df['Monthly Observations'] / benchmark_df['No of Beds']
+    
+    # 5. 计算每个月的四分位数 (Q1, Q3)
+    # 我们使用 transform 将每个月的Q1, Q3值广播到该月的所有行
+    quartiles = benchmark_df.groupby('Month')['Usage per Bed'].quantile([0.25, 0.75]).unstack()
+    quartiles.columns = ['Q1', 'Q3']
+    
+    # 将分位数合并回主表
+    benchmark_df = pd.merge(benchmark_df, quartiles, on='Month', how='left')
+
+    # 6. 根据分位数进行分组
+    conditions = [
+        benchmark_df['Usage per Bed'] >= benchmark_df['Q3'],
+        benchmark_df['Usage per Bed'] <= benchmark_df['Q1']
+    ]
+    choices = ['High', 'Low']
+    benchmark_df['Group'] = np.select(conditions, choices, default='Medium')
+    
+    # 为了热力图可视化，将分组映射为数值
+    group_map = {'Low': 0, 'Medium': 1, 'High': 2}
+    benchmark_df['Group Value'] = benchmark_df['Group'].map(group_map)
+
+    return benchmark_df.sort_values(by=['Care Home Name', 'Month']).reset_index(drop=True)
