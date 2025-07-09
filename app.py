@@ -407,36 +407,51 @@ elif step_title == "Benchmark Grouping":
         if monthly_benchmark_df.empty or geospatial_df.empty:
             st.info("Not enough data to generate benchmark statistics.")
         else:
-            # 1. 箱线图 (Boxplot) - 使用月度数据
-            st.subheader("Monthly Distribution of Usage per Bed")
+            # --- 新增：年份选择功能 ---
+            monthly_benchmark_df['Year'] = pd.to_datetime(monthly_benchmark_df['Month']).dt.year
+            available_years = sorted(monthly_benchmark_df['Year'].unique(), reverse=True)
+            selected_year = st.selectbox(
+                "Select Year to Display",
+                options=available_years,
+                index=0
+            )
+            
+            # 根据选择的年份筛选数据
+            yearly_data = monthly_benchmark_df[monthly_benchmark_df['Year'] == selected_year]
+            
+            # 1. 箱线图 (Boxplot) - 使用筛选后的年度数据
+            st.subheader(f"Monthly Distribution of Usage per Bed for {selected_year}")
             st.markdown("This boxplot shows the distribution of 'average usage per bed' across all care homes for each month.")
-            sorted_months = sorted(monthly_benchmark_df['Month'].unique())
+            
+            # 确保月份按时间顺序排序
+            sorted_months = sorted(yearly_data['Month'].unique())
+
             fig_box = px.box(
-                monthly_benchmark_df,
+                yearly_data,
                 x='Month',
                 y='Usage per Bed',
                 points='all',
                 category_orders={'Month': sorted_months},
                 labels={'Usage per Bed': 'Average Usage per Bed', 'Month': 'Month'},
-                title='Distribution of Monthly Usage per Bed Across All Care Homes'
+                title=f'Distribution of Monthly Usage per Bed ({selected_year})'
             )
-            fig_box.update_traces(pointpos=0)
+            fig_box.update_traces(pointpos=0) # 将抖动点的位置居中
             st.plotly_chart(fig_box, use_container_width=True)
 
-            # 2. Benchmark Grouping 热力图 (Heatmap) - 使用月度数据
-            st.subheader("Benchmark Grouping Heatmap")
+            # 2. Benchmark Grouping 热力图 (Heatmap) - 同样使用筛选后的年度数据
+            st.subheader(f"Benchmark Grouping Heatmap for {selected_year}")
             st.markdown("This heatmap classifies each care home's monthly usage into three tiers based on the quartiles of that month's distribution.")
             st.markdown("- **<span style='color:green;'>High</span>**: Usage ≥ 75th percentile (Q3)\n"
                         "- **<span style='color:goldenrod;'>Medium</span>**: Usage between 25th (Q1) and 75th (Q3) percentile\n"
                         "- **<span style='color:red;'>Low</span>**: Usage ≤ 25th percentile (Q1)",
                         unsafe_allow_html=True)
 
-            heatmap_pivot = monthly_benchmark_df.pivot_table(
+            heatmap_pivot = yearly_data.pivot_table(
                 index='Care Home Name',
                 columns='Month',
                 values='Group Value'
             )
-            heatmap_pivot = heatmap_pivot[sorted_months]
+            heatmap_pivot = heatmap_pivot[sorted_months] # 使用与箱线图相同的排序月份
             colorscale = [
                 [0, 'red'],
                 [0.5, 'yellow'],
@@ -444,7 +459,6 @@ elif step_title == "Benchmark Grouping":
             ]
 
             # 动态计算热力图的高度
-            # 给每个护理院分配约 30-40 像素的高度，并设置一个最小高度
             num_care_homes = len(heatmap_pivot.index)
             heatmap_height = max(400, num_care_homes * 30)
 
@@ -461,11 +475,11 @@ elif step_title == "Benchmark Grouping":
                 )
             ))
             fig_heatmap.update_layout(
-                title='Care Home Monthly Usage Benchmark',
+                title=f'Care Home Monthly Usage Benchmark ({selected_year})',
                 xaxis_title='Month',
                 yaxis_title='Care Home',
                 yaxis_autorange='reversed',
-                height=heatmap_height  # <--- 在这里设置动态高度
+                height=heatmap_height
             )
             st.plotly_chart(fig_heatmap, use_container_width=True)
 
