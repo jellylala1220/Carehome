@@ -407,81 +407,88 @@ elif step_title == "Benchmark Grouping":
         if monthly_benchmark_df.empty or geospatial_df.empty:
             st.info("Not enough data to generate benchmark statistics.")
         else:
-            # --- 新增：年份选择功能 ---
+            # --- 新增：带有 "All Years" 选项的年份选择功能 ---
             monthly_benchmark_df['Year'] = pd.to_datetime(monthly_benchmark_df['Month']).dt.year
             available_years = sorted(monthly_benchmark_df['Year'].unique(), reverse=True)
+            year_options = ["All Years"] + available_years
+            
             selected_year = st.selectbox(
                 "Select Year to Display",
-                options=available_years,
-                index=0
+                options=year_options,
+                index=0,
+                key="benchmark_year_select"
             )
             
             # 根据选择的年份筛选数据
-            yearly_data = monthly_benchmark_df[monthly_benchmark_df['Year'] == selected_year]
-            
-            # 1. 箱线图 (Boxplot) - 使用筛选后的年度数据
-            st.subheader(f"Monthly Distribution of Usage per Bed for {selected_year}")
+            if selected_year == "All Years":
+                data_to_plot = monthly_benchmark_df
+                title_suffix = "(All Years)"
+            else:
+                data_to_plot = monthly_benchmark_df[monthly_benchmark_df['Year'] == selected_year]
+                title_suffix = f"for {selected_year}"
+
+            # 1. 箱线图 (Boxplot) - 使用筛选后的数据
+            st.subheader(f"Monthly Distribution of Usage per Bed {title_suffix}")
             st.markdown("This boxplot shows the distribution of 'average usage per bed' across all care homes for each month.")
             
-            # 确保月份按时间顺序排序
-            sorted_months = sorted(yearly_data['Month'].unique())
+            sorted_months = sorted(data_to_plot['Month'].unique())
 
             fig_box = px.box(
-                yearly_data,
+                data_to_plot,
                 x='Month',
                 y='Usage per Bed',
                 points='all',
                 category_orders={'Month': sorted_months},
                 labels={'Usage per Bed': 'Average Usage per Bed', 'Month': 'Month'},
-                title=f'Distribution of Monthly Usage per Bed ({selected_year})'
+                title=f'Distribution of Monthly Usage per Bed {title_suffix}'
             )
-            fig_box.update_traces(pointpos=0) # 将抖动点的位置居中
+            fig_box.update_traces(pointpos=0)
             st.plotly_chart(fig_box, use_container_width=True)
 
-            # 2. Benchmark Grouping 热力图 (Heatmap) - 同样使用筛选后的年度数据
-            st.subheader(f"Benchmark Grouping Heatmap for {selected_year}")
+            # 2. Benchmark Grouping 热力图 (Heatmap) - 同样使用筛选后的数据
+            st.subheader(f"Benchmark Grouping Heatmap {title_suffix}")
             st.markdown("This heatmap classifies each care home's monthly usage into three tiers based on the quartiles of that month's distribution.")
             st.markdown("- **<span style='color:green;'>High</span>**: Usage ≥ 75th percentile (Q3)\n"
                         "- **<span style='color:goldenrod;'>Medium</span>**: Usage between 25th (Q1) and 75th (Q3) percentile\n"
                         "- **<span style='color:red;'>Low</span>**: Usage ≤ 25th percentile (Q1)",
                         unsafe_allow_html=True)
 
-            heatmap_pivot = yearly_data.pivot_table(
+            heatmap_pivot = data_to_plot.pivot_table(
                 index='Care Home Name',
                 columns='Month',
                 values='Group Value'
             )
-            heatmap_pivot = heatmap_pivot[sorted_months] # 使用与箱线图相同的排序月份
-            colorscale = [
-                [0, 'red'],
-                [0.5, 'yellow'],
-                [1, 'green']
-            ]
+            if not heatmap_pivot.empty:
+                heatmap_pivot = heatmap_pivot[sorted_months]
+                colorscale = [
+                    [0, 'red'],
+                    [0.5, 'yellow'],
+                    [1, 'green']
+                ]
 
-            # 动态计算热力图的高度
-            num_care_homes = len(heatmap_pivot.index)
-            heatmap_height = max(400, num_care_homes * 30)
+                num_care_homes = len(heatmap_pivot.index)
+                heatmap_height = max(400, num_care_homes * 30)
 
-            fig_heatmap = go.Figure(data=go.Heatmap(
-                z=heatmap_pivot.values,
-                x=heatmap_pivot.columns,
-                y=heatmap_pivot.index,
-                colorscale=colorscale,
-                showscale=True,
-                colorbar=dict(
-                    title='Benchmark Group',
-                    tickvals=[0, 1, 2],
-                    ticktext=['Low', 'Medium', 'High']
+                fig_heatmap = go.Figure(data=go.Heatmap(
+                    z=heatmap_pivot.values,
+                    x=heatmap_pivot.columns,
+                    y=heatmap_pivot.index,
+                    colorscale=colorscale,
+                    showscale=True,
+                    colorbar=dict(
+                        title='Benchmark Group',
+                        tickvals=[0, 1, 2],
+                        ticktext=['Low', 'Medium', 'High']
+                    )
+                ))
+                fig_heatmap.update_layout(
+                    title=f'Care Home Monthly Usage Benchmark {title_suffix}',
+                    xaxis_title='Month',
+                    yaxis_title='Care Home',
+                    yaxis_autorange='reversed',
+                    height=heatmap_height
                 )
-            ))
-            fig_heatmap.update_layout(
-                title=f'Care Home Monthly Usage Benchmark ({selected_year})',
-                xaxis_title='Month',
-                yaxis_title='Care Home',
-                yaxis_autorange='reversed',
-                height=heatmap_height
-            )
-            st.plotly_chart(fig_heatmap, use_container_width=True)
+                st.plotly_chart(fig_heatmap, use_container_width=True)
 
             # 3. 新增：地理分布图
             st.subheader("Geospatial Distribution of High Usage Frequency")
@@ -563,27 +570,48 @@ elif step_title == "Regional Analysis":
         if 'Area' not in df.columns or 'No of Beds' not in df.columns:
             st.error("Source data must contain 'Area' and 'No of Beds' columns for this analysis.")
         else:
-            monthly_df = get_monthly_regional_benchmark_data(df)
+            monthly_df_full = get_monthly_regional_benchmark_data(df)
 
-            if monthly_df.empty:
+            if monthly_df_full.empty:
                 st.info("Not enough data to generate regional analysis.")
             else:
+                # --- 新增：为区域分析图表添加年份选择器 ---
+                monthly_df_full['Year'] = pd.to_datetime(monthly_df_full['Month']).dt.year
+                regional_available_years = sorted(monthly_df_full['Year'].unique(), reverse=True)
+                regional_year_options = ["All Years"] + regional_available_years
+                
+                selected_regional_year = st.selectbox(
+                    "Select Year to Display",
+                    options=regional_year_options,
+                    index=0,
+                    key="regional_year_select"
+                )
+
+                # 根据选择筛选数据
+                if selected_regional_year == "All Years":
+                    monthly_df = monthly_df_full
+                    regional_title_suffix = "(All Years)"
+                else:
+                    monthly_df = monthly_df_full[monthly_df_full['Year'] == selected_regional_year]
+                    regional_title_suffix = f"for {selected_regional_year}"
+                
                 sorted_months = sorted(monthly_df['Month'].unique())
 
-                st.subheader("A. Monthly Usage per Bed by Area")
+                st.subheader(f"A. Monthly Usage per Bed by Area {regional_title_suffix}")
                 st.markdown("This boxplot shows the distribution of 'average usage per bed' across all care homes within each area, for each month.")
                 fig_box = px.box(
                     monthly_df,
                     x='Month', y='Usage per Bed', color='Area',
                     category_orders={'Month': sorted_months},
                     labels={'Usage per Bed': 'Average Usage per Bed', 'Month': 'Month', 'Area': 'Area'},
-                    title='Distribution of Monthly Usage per Bed by Area',
+                    title=f'Distribution of Monthly Usage per Bed by Area {regional_title_suffix}',
                     points='all'
                 )
-                fig_box.update_traces(pointpos=0) 
+                fig_box.update_traces(pointpos=0)
                 st.plotly_chart(fig_box, use_container_width=True)
 
-                st.markdown("---") 
+                st.markdown("---")
+
                 st.subheader("B. Area Benchmark Grouping Percentage")
                 st.markdown("This chart shows the percentage of care homes in each benchmark group (High/Medium/Low) for each area, on a monthly basis.")
 
