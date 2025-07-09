@@ -6,6 +6,7 @@ from data_processor_simple import (
     plot_usage_counts, plot_usage_per_bed, plot_coverage,
     plot_news2_counts, plot_high_risk_prop, plot_concern_prop,
     plot_judgement_accuracy, plot_high_score_params,
+    plot_news2_barchart,  # <-- 新增导入
     predict_next_month_bayesian,
     calculate_benchmark_data,
     geocode_uk_postcodes,
@@ -202,10 +203,28 @@ elif step_title == "Care Home Analysis":
                 st.header("Health Insights (Based on NEWS2)")
                 period2 = st.selectbox("Time Granularity (Health Insights)", ["Daily", "Weekly", "Monthly", "Yearly"], index=2, key="health_period")
                 
-                # 下面这一行是关键，请确保它存在！
                 hi_data = process_health_insights(df, care_home, period2)
                 
-                st.plotly_chart(plot_news2_counts(hi_data, period2), use_container_width=True, key="news2_counts")
+                # --- 新增：NEWS2分数过滤器 ---
+                if hi_data.get('news2_counts') is not None and not hi_data['news2_counts'].empty:
+                    all_scores = sorted(hi_data['news2_counts'].columns)
+                    
+                    selected_scores = st.multiselect(
+                        "Filter NEWS2 Scores:",
+                        options=all_scores,
+                        default=all_scores, # 默认全选
+                        key=f"news2_filter_{care_home}"
+                    )
+
+                    if selected_scores:
+                        st.plotly_chart(plot_news2_counts(hi_data, period2, selected_scores=selected_scores), use_container_width=True, key="news2_counts")
+                        st.plotly_chart(plot_news2_barchart(hi_data, period2, selected_scores=selected_scores), use_container_width=True, key="news2_barchart")
+                    else:
+                        st.info("Please select at least one NEWS2 score from the filter above to display the charts.")
+                else:
+                    st.info("No NEWS2 score data available to display.")
+
+                # --- 保留其他图表 ---
                 st.plotly_chart(plot_high_risk_prop(hi_data, period2), use_container_width=True, key="high_risk_prop")
                 st.plotly_chart(plot_concern_prop(hi_data, period2), use_container_width=True, key="concern_prop")
                 st.plotly_chart(plot_judgement_accuracy(hi_data, period2), use_container_width=True, key="judgement_accuracy")

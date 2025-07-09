@@ -280,26 +280,86 @@ def plot_coverage(df):
     )
     return fig
 
-def plot_news2_counts(hi_data, period):
-    """绘制 NEWS2 计数图"""
-    if 'news2_counts' not in hi_data or hi_data['news2_counts'].empty:
-        return go.Figure()
+def plot_news2_counts(hi_data, period, selected_scores=None):
+    df = hi_data.get('news2_counts')
+    if df is None or df.empty:
+        fig = go.Figure()
+        fig.add_annotation(text="No data available for NEWS2 counts", xref="paper", yref="paper", showarrow=False, font=dict(size=20))
+        return fig
     
-    df = hi_data['news2_counts']
+    fig = go.Figure()
+
+    # 如果未提供选择，则默认显示所有分数
+    scores_to_plot = selected_scores if selected_scores else df.columns
+
+    for col in scores_to_plot:
+        if col not in df.columns:
+            continue
+        try:
+            score = int(col)
+        except (ValueError, TypeError):
+            continue
+
+        # 颜色分配
+        if score <= 3:
+            color = f'rgba(0,200,0,{0.3+0.2*score})'
+        elif 4 <= score <= 5:
+            color = f'rgba(255,215,0,{0.5+0.2*(score-4)})'
+        else:
+            color = f'rgba(220,0,0,{0.5+0.1*(score-6)})'
+            
+        fig.add_trace(go.Scatter(
+            x=df.index, y=df[col], mode='lines+markers',
+            name=f'NEWS2={col}', line=dict(color=color, width=3),
+            marker=dict(color=color)
+        ))
+        
+    fig.update_layout(
+        title=f'NEWS2 Score Distribution ({period}) - Line Chart',
+        xaxis_title='Time', yaxis_title='Count',
+        hovermode='x unified'
+    )
+    return fig
+
+def plot_news2_barchart(hi_data, period, selected_scores=None):
+    """新增：绘制NEWS2分数分布的堆叠柱状图"""
+    df = hi_data.get('news2_counts')
+    if df is None or df.empty:
+        return go.Figure() # 返回空图
+
     fig = go.Figure()
     
-    for score in df.columns:
-        fig.add_trace(go.Scatter(
-            x=df.index,
-            y=df[score],
-            mode='lines+markers',
-            name=f'NEWS2 Score {score}'
+    # 如果未提供选择，则默认显示所有分数
+    scores_to_plot = selected_scores if selected_scores else df.columns
+
+    for col in scores_to_plot:
+        if col not in df.columns:
+            continue
+        try:
+            score = int(col)
+        except (ValueError, TypeError):
+            continue
+
+        # 使用与折线图一致的颜色逻辑
+        if score <= 3:
+            color = f'rgba(0,200,0,{0.3+0.2*score})'
+        elif 4 <= score <= 5:
+            color = f'rgba(255,215,0,{0.5+0.2*(score-4)})'
+        else:
+            color = f'rgba(220,0,0,{0.5+0.1*(score-6)})'
+            
+        fig.add_trace(go.Bar(
+            x=df.index, 
+            y=df[col],
+            name=f'NEWS2={col}',
+            marker_color=color
         ))
-    
+        
     fig.update_layout(
-        title=f'NEWS2 Score Counts ({period})',
-        xaxis_title='Date',
-        yaxis_title='Count'
+        barmode='stack', # 设置为堆叠模式
+        title=f'NEWS2 Score Distribution ({period}) - Stacked Bar Chart',
+        xaxis_title='Time', yaxis_title='Total Count',
+        hovermode='x unified'
     )
     return fig
 
