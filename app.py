@@ -9,7 +9,8 @@ from data_processor_simple import (
     predict_next_month_bayesian,
     calculate_benchmark_data,
     geocode_uk_postcodes,
-    get_monthly_regional_benchmark_data
+    get_monthly_regional_benchmark_data,
+    calculate_correlation_data
 )
 import plotly.graph_objects as go
 import plotly.express as px
@@ -29,7 +30,8 @@ with st.sidebar:
             "Batch Prediction", 
             "Prediction Visualization",
             "Benchmark Grouping",
-            "Regional Analysis"
+            "Regional Analysis",
+            "Correlation Analysis"
         ],
         # 可选：为每个按钮添加图标
         icons=[
@@ -38,7 +40,8 @@ with st.sidebar:
             "cpu", 
             "graph-up-arrow", 
             "bar-chart-line",
-            "globe-americas"
+            "globe-americas",
+            "link-45deg"
         ],
         menu_icon="cast",  # 菜单图标
         default_index=0,  # 默认选中的按钮
@@ -610,3 +613,86 @@ elif step_title == "Regional Analysis":
                     file_name="regional_benchmark_summary.csv",
                     mime="text/csv",
                 )
+
+# Step 7: Correlation Analysis
+elif step_title == "Correlation Analysis":
+    st.title("Care Home Analysis Dashboard")
+    st.header("Step 7: Correlation Analysis")
+    st.markdown("Analysis of the correlation between monthly high NEWS scores (≥6) and average usage per bed.")
+
+    if st.session_state['df'] is None:
+        st.warning("Please upload data in Step 1 to begin this analysis.")
+    else:
+        df = st.session_state['df']
+
+        if 'NEWS2 score' not in df.columns or 'No of Beds' not in df.columns:
+            st.error("Source data must contain 'NEWS2 score' and 'No of Beds' columns for this analysis.")
+        else:
+            with st.spinner("Calculating monthly data and correlations..."):
+                monthly_corr_df, corr_summary_df = calculate_correlation_data(df)
+
+            if corr_summary_df.empty:
+                st.info("Not enough data to generate correlation analysis. Each care home needs at least 3 months of data with valid observations.")
+            else:
+                # Part A: Correlation Analysis
+                st.subheader("A. Correlation Coefficient Summary")
+                st.markdown("This table shows the Pearson and Spearman correlation coefficients between 'High NEWS Count' and 'Usage per Bed' for each care home.")
+                
+                st.dataframe(corr_summary_df.style.format({
+                    'Pearson r': '{:.3f}', 'Pearson p-value': '{:.3f}',
+                    'Spearman r': '{:.3f}', 'Spearman p-value': '{:.3f}'
+                }), use_container_width=True)
+
+                csv = corr_summary_df.to_csv(index=False).encode('utf-8')
+                st.download_button(
+                    label="Download Correlation Summary (.csv)",
+                    data=csv,
+                    file_name="correlation_summary.csv",
+                    mime="text/csv",
+                )
+
+                st.markdown("---")
+
+                # Part B: Trend Visualization
+                st.subheader("B. Trend Visualization")
+                st.markdown("Select a care home to visualize the monthly trend of 'High NEWS Count' and 'Usage per Bed'.")
+
+                care_home_map = (
+                    monthly_corr_df[['Care Home ID', 'Care Home Name']]
+                    .drop_duplicates()
+                    .set_index('Care Home ID')['Care Home Name']
+                    .to_dict()
+                )
+                
+                selected_care_home_id = st.selectbox(
+                    "Select Care Home for Trend Analysis",
+                    options=sorted(list(care_home_map.keys())),
+                    format_func=lambda x: f"{x} | {care_home_map[x]}"
+                )
+
+                if selected_care_home_id:
+                    sub = monthly_corr_df[monthly_corr_df['Care Home ID'] == selected_care_home_id].sort_values('Month')
+                    
+                    fig = go.Figure()
+                    
+                    fig.add_trace(go.Scatter(
+                        x=sub['Month'], y=sub['High NEWS Count'], name='High NEWS (≥6) Count',
+                        mode='lines+markers', yaxis='y1',
+                        line=dict(color='blue'), marker=dict(color='blue')
+                    ))
+                    
+                    fig.add_trace(go.Scatter(
+                        x=sub['Month'], y=sub['Usage per Bed'], name='Avg Usage per Bed',
+                        mode='lines+markers', yaxis='y2',
+                        line=dict(color='red'), marker=dict(color='red')
+                    ))
+                    
+                    fig.update_layout(
+                        title_text=f"<b>Care Home: {care_home_map[selected_care_home_id]}</b>",
+                        xaxis_title="Month",
+                        yaxis=dict(title="<b>High NEWS (≥6) Count</b>", side='left', color='blue'),
+                        yaxis2=dict(title="<b>Avg Usage per Bed</b>", overlaying='y', side='right', showgrid=False, color='red'),
+                        legend=dict(x=0.01, y=0.99, yanchor='top', xanchor='left', borderwidth=1),
+                        hovermode='x unified'
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
