@@ -541,3 +541,54 @@ def geocode_uk_postcodes(df, postcode_column='Post Code'):
     df_copy['Longitude'] = df_copy['Longitude'].fillna(longitudes)
     
     return df_copy
+
+def calculate_correlation_data(df):
+    """
+    计算高NEWS数与每床使用量的相关性.
+    返回包含月度数据的DataFrame和包含相关系数的DataFrame.
+    """
+    if 'NEWS2 score' not in df.columns or 'No of Beds' not in df.columns:
+        return pd.DataFrame(), pd.DataFrame()
+
+    df_copy = df.copy()
+    df_copy['Date/Time'] = pd.to_datetime(df_copy['Date/Time'])
+    df_copy['Month'] = df_copy['Date/Time'].dt.to_period('M')
+
+    # xij: 每家每月高NEWS数 (NEWS2 score >= 6)
+    high_news = df_copy[df_copy['NEWS2 score'] >= 6]
+    xij = high_news.groupby(['Care Home ID', 'Care Home Name', 'Month']).size().rename('High NEWS Count').reset_index()
+
+    # yij: 每家每月usage per bed
+    beds_info = df_copy.drop_duplicates('Care Home ID').set_index('Care Home ID')['No of Beds']
+    usage = df_copy.groupby(['Care Home ID', 'Month']).size().rename('Obs Count').reset_index()
+    yij = usage.merge(beds_info, on='Care Home ID', how='left')
+    yij['Usage per Bed'] = yij['Obs Count'] / yij['No of Beds']
+
+  # 合并 xij 和 yij
+    full_df = pd.merge(yij, xij, on=['Care Home ID', 'Month', 'Care Home Name'], how='left').fillna({'High NEWS Count': 0})
+    full_df['High NEWS Count'] = full_df['High NEWS Count'].astype(int)
+    
+    # 计算相关系数
+    corrs = []
+    for care_home_id in full_df['Care Home ID'].unique():
+        sub = full_df[full_df['Care Home ID'] == care_home_id]
+        care_home_name = sub['Care Home Name'].iloc[0]
+        
+        if len(sub) >= 3: # 至少需要3个数据点来计算有意义的相关性
+            pearson_r, pearson_p = stats.pearsonr(sub['High NEWS Count'], sub['Usage per Bed'])
+            spearman_r, spearman_p = stats.spearmanr(sub['High NEWS Count'], sub['Usage per Bed'])
+            corrs.append({
+                'Care Home ID': care_home_id,
+                'Care Home Name': care_home_name,
+                'Pearson r': pearson_r, 
+                'Pearson p-value': pearson_p,
+                'Spearman r': spearman_r,
+                'Spearman p-value': spearman_p,
+                'Months': len(sub)
+            })
+    corr_df = pd.DataFrame(corrs)
+    
+    # 将月份转为字符串以便绘图
+    full_df['Month'] = full_df['Month'].astype(str)
+
+    return full_df, corr_df
