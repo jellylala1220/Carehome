@@ -280,6 +280,36 @@ def plot_coverage(df):
     )
     return fig
 
+def get_news2_color(score):
+    """
+    为一个NEWS2分数返回一个包含背景色和适配文本色的字典。
+    """
+    try:
+        score = int(score)
+    except (ValueError, TypeError):
+        # 为无效分数提供默认灰色
+        return {'background': 'rgba(128,128,128,0.5)', 'text': '#FFFFFF'}
+
+    r, g, b = 0, 0, 0
+    alpha = 0.7
+    if score <= 3:
+        r, g, b = 0, 200, 0
+        alpha = 0.3 + 0.2 * score
+    elif 4 <= score <= 5:
+        r, g, b = 255, 215, 0
+        alpha = 0.5 + 0.2 * (score - 4)
+    else:
+        r, g, b = 220, 0, 0
+        alpha = 0.5 + 0.1 * (score - 6)
+
+    background_color = f'rgba({r},{g},{b},{alpha})'
+    
+    # 基于背景亮度计算，以确保文字可读性
+    brightness = (r * 299 + g * 587 + b * 114) / 1000
+    text_color = '#FFFFFF' if brightness < 128 else '#000000'
+    
+    return {'background': background_color, 'text': text_color}
+
 def plot_news2_counts(hi_data, period, selected_scores=None):
     df = hi_data.get('news2_counts')
     if df is None or df.empty:
@@ -288,25 +318,13 @@ def plot_news2_counts(hi_data, period, selected_scores=None):
         return fig
     
     fig = go.Figure()
-
-    # 如果未提供选择，则默认显示所有分数
     scores_to_plot = selected_scores if selected_scores else df.columns
 
     for col in scores_to_plot:
-        if col not in df.columns:
-            continue
-        try:
-            score = int(col)
-        except (ValueError, TypeError):
-            continue
-
-        # 颜色分配
-        if score <= 3:
-            color = f'rgba(0,200,0,{0.3+0.2*score})'
-        elif 4 <= score <= 5:
-            color = f'rgba(255,215,0,{0.5+0.2*(score-4)})'
-        else:
-            color = f'rgba(220,0,0,{0.5+0.1*(score-6)})'
+        if col not in df.columns: continue
+        
+        color_details = get_news2_color(col) # 调用新函数
+        color = color_details['background']
             
         fig.add_trace(go.Scatter(
             x=df.index, y=df[col], mode='lines+markers',
@@ -325,28 +343,16 @@ def plot_news2_barchart(hi_data, period, selected_scores=None):
     """新增：绘制NEWS2分数分布的堆叠柱状图"""
     df = hi_data.get('news2_counts')
     if df is None or df.empty:
-        return go.Figure() # 返回空图
+        return go.Figure()
 
     fig = go.Figure()
-    
-    # 如果未提供选择，则默认显示所有分数
     scores_to_plot = selected_scores if selected_scores else df.columns
 
     for col in scores_to_plot:
-        if col not in df.columns:
-            continue
-        try:
-            score = int(col)
-        except (ValueError, TypeError):
-            continue
-
-        # 使用与折线图一致的颜色逻辑
-        if score <= 3:
-            color = f'rgba(0,200,0,{0.3+0.2*score})'
-        elif 4 <= score <= 5:
-            color = f'rgba(255,215,0,{0.5+0.2*(score-4)})'
-        else:
-            color = f'rgba(220,0,0,{0.5+0.1*(score-6)})'
+        if col not in df.columns: continue
+        
+        color_details = get_news2_color(col) # 调用新函数
+        color = color_details['background']
             
         fig.add_trace(go.Bar(
             x=df.index, 
@@ -356,7 +362,7 @@ def plot_news2_barchart(hi_data, period, selected_scores=None):
         ))
         
     fig.update_layout(
-        barmode='stack', # 设置为堆叠模式
+        barmode='stack',
         title=f'NEWS2 Score Distribution ({period}) - Stacked Bar Chart',
         xaxis_title='Time', yaxis_title='Total Count',
         hovermode='x unified'

@@ -11,7 +11,8 @@ from data_processor_simple import (
     calculate_benchmark_data,
     geocode_uk_postcodes,
     get_monthly_regional_benchmark_data,
-    calculate_correlation_data
+    calculate_correlation_data,
+    get_news2_color # <-- 新增导入
 )
 import plotly.graph_objects as go
 import plotly.express as px
@@ -205,14 +206,23 @@ elif step_title == "Care Home Analysis":
                 
                 hi_data = process_health_insights(df, care_home, period2)
                 
-                # --- 新增：NEWS2分数过滤器 ---
                 if hi_data.get('news2_counts') is not None and not hi_data['news2_counts'].empty:
                     all_scores = sorted(hi_data['news2_counts'].columns)
                     
+                    # --- 新增：动态生成颜色图例 ---
+                    legend_items = []
+                    for score in all_scores:
+                        colors = get_news2_color(score)
+                        legend_items.append(
+                            f'<span style="background-color: {colors["background"]}; color: {colors["text"]}; padding: 3px 8px; margin: 2px; border-radius: 5px; font-weight: bold; display: inline-block;">'
+                            f'{score}</span>'
+                        )
+                    st.markdown("<b>NEWS2 Score Legend & Filter:</b><br>" + " ".join(legend_items), unsafe_allow_html=True)
+
                     selected_scores = st.multiselect(
-                        "Filter NEWS2 Scores:",
+                        "You can hide scores by removing them below:", # 更新了提示语
                         options=all_scores,
-                        default=all_scores, # 默认全选
+                        default=all_scores,
                         key=f"news2_filter_{care_home}"
                     )
 
@@ -220,7 +230,7 @@ elif step_title == "Care Home Analysis":
                         st.plotly_chart(plot_news2_counts(hi_data, period2, selected_scores=selected_scores), use_container_width=True, key="news2_counts")
                         st.plotly_chart(plot_news2_barchart(hi_data, period2, selected_scores=selected_scores), use_container_width=True, key="news2_barchart")
                     else:
-                        st.info("Please select at least one NEWS2 score from the filter above to display the charts.")
+                        st.info("Please select at least one NEWS2 score from the filter to display the charts.")
                 else:
                     st.info("No NEWS2 score data available to display.")
 
