@@ -545,6 +545,7 @@ def geocode_uk_postcodes(df, postcode_column='Post Code'):
 def calculate_correlation_data(df):
     """
     计算高NEWS数与每床使用量的相关性.
+    此函数基于用户提供的逻辑实现。
     返回包含月度数据的DataFrame和包含相关系数的DataFrame.
     """
     if 'NEWS2 score' not in df.columns or 'No of Beds' not in df.columns:
@@ -560,32 +561,42 @@ def calculate_correlation_data(df):
 
     # yij: 每家每月usage per bed
     beds_info = df_copy.drop_duplicates('Care Home ID').set_index('Care Home ID')['No of Beds']
-    usage = df_copy.groupby(['Care Home ID', 'Month']).size().rename('Obs Count').reset_index()
+    # 修正：在 groupby 中加入 'Care Home Name'
+    usage = df_copy.groupby(['Care Home ID', 'Care Home Name', 'Month']).size().rename('Obs Count').reset_index()
     yij = usage.merge(beds_info, on='Care Home ID', how='left')
     yij['Usage per Bed'] = yij['Obs Count'] / yij['No of Beds']
+    yij.dropna(subset=['Usage per Bed'], inplace=True)
 
-  # 合并 xij 和 yij
-    full_df = pd.merge(yij, xij, on=['Care Home ID', 'Month', 'Care Home Name'], how='left').fillna({'High NEWS Count': 0})
+    # 合并 xij 和 yij
+    # 修正：确保合并键在两个DataFrame中都存在
+    full_df = pd.merge(yij, xij, on=['Care Home ID', 'Care Home Name', 'Month'], how='left').fillna({'High NEWS Count': 0})
     full_df['High NEWS Count'] = full_df['High NEWS Count'].astype(int)
     
     # 计算相关系数
     corrs = []
     for care_home_id in full_df['Care Home ID'].unique():
         sub = full_df[full_df['Care Home ID'] == care_home_id]
-        care_home_name = sub['Care Home Name'].iloc[0]
         
         if len(sub) >= 3: # 至少需要3个数据点来计算有意义的相关性
-            pearson_r, pearson_p = stats.pearsonr(sub['High NEWS Count'], sub['Usage per Bed'])
-            spearman_r, spearman_p = stats.spearmanr(sub['High NEWS Count'], sub['Usage per Bed'])
+            care_home_name = sub['Care Home Name'].iloc[0]
+            
+            # 检查标准差是否为零，避免计算错误
+            if np.isclose(sub['High NEWS Count'].std(), 0) or np.isclose(sub['Usage per Bed'].std(), 0):
+                pr, pp, sr, sp = np.nan, np.nan, np.nan, np.nan
+            else:
+                pr, pp = stats.pearsonr(sub['High NEWS Count'], sub['Usage per Bed'])
+                sr, sp = stats.spearmanr(sub['High NEWS Count'], sub['Usage per Bed'])
+
             corrs.append({
                 'Care Home ID': care_home_id,
                 'Care Home Name': care_home_name,
-                'Pearson r': pearson_r, 
-                'Pearson p-value': pearson_p,
-                'Spearman r': spearman_r,
-                'Spearman p-value': spearman_p,
+                'Pearson r': pr, 
+                'Pearson p-value': pp,
+                'Spearman r': sr,
+                'Spearman p-value': sp,
                 'Months': len(sub)
             })
+            
     corr_df = pd.DataFrame(corrs)
     
     # 将月份转为字符串以便绘图

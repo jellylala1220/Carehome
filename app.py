@@ -420,6 +420,7 @@ elif step_title == "Benchmark Grouping":
                 labels={'Usage per Bed': 'Average Usage per Bed', 'Month': 'Month'},
                 title='Distribution of Monthly Usage per Bed Across All Care Homes'
             )
+            fig_box.update_traces(pointpos=0)
             st.plotly_chart(fig_box, use_container_width=True)
 
             # 2. Benchmark Grouping 热力图 (Heatmap) - 使用月度数据
@@ -565,10 +566,10 @@ elif step_title == "Regional Analysis":
                     title='Distribution of Monthly Usage per Bed by Area',
                     points='all'
                 )
+                fig_box.update_traces(pointpos=0) 
                 st.plotly_chart(fig_box, use_container_width=True)
 
-                st.markdown("---")
-
+                st.markdown("---") 
                 st.subheader("B. Area Benchmark Grouping Percentage")
                 st.markdown("This chart shows the percentage of care homes in each benchmark group (High/Medium/Low) for each area, on a monthly basis.")
 
