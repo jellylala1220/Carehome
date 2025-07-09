@@ -20,6 +20,16 @@ from streamlit_option_menu import option_menu
 
 st.set_page_config(page_title="Care Home Analysis Dashboard", layout="wide")
 
+# Initialize session state
+if 'df' not in st.session_state:
+    st.session_state['df'] = None
+if 'go_analysis' not in st.session_state:
+    st.session_state['go_analysis'] = False
+if 'prediction_df' not in st.session_state:
+    st.session_state['prediction_df'] = None
+if 'processed_file_name' not in st.session_state:
+    st.session_state['processed_file_name'] = None
+
 # Sidebar navigation - 改用新的 option_menu
 with st.sidebar:
     step_title = option_menu(
@@ -47,14 +57,6 @@ with st.sidebar:
         default_index=0,  # 默认选中的按钮
     )
 
-# Initialize session state
-if 'df' not in st.session_state:
-    st.session_state['df'] = None
-if 'go_analysis' not in st.session_state:
-    st.session_state['go_analysis'] = False
-if 'prediction_df' not in st.session_state:
-    st.session_state['prediction_df'] = None
-
 # Step 1: Upload Data
 if step_title == "Upload Data":
     st.title("Care Home Analysis Dashboard")
@@ -63,40 +65,52 @@ if step_title == "Upload Data":
     main_data_file = st.file_uploader("Upload Observation Data (Excel)", type=["xlsx"])
 
     if main_data_file:
-        try:
-            df = pd.read_excel(main_data_file)
-            
-            # Clean column names
-            df.columns = [str(col).strip() for col in df.columns]
-
-            # Geocoding logic
-            needs_geocoding = ('Latitude' not in df.columns or 'Longitude' not in df.columns or
-                               df['Latitude'].isnull().any() or df['Longitude'].isnull().any())
-            
-            if needs_geocoding and 'Post Code' in df.columns:
-                with st.spinner("Geospatial data missing or incomplete. Attempting to generate from 'Post Code' column..."):
-                    lat_nan_before = df['Latitude'].isnull().sum() if 'Latitude' in df.columns else len(df)
+        # 检查是否上传了一个新文件
+        if st.session_state.get('processed_file_name') != main_data_file.name:
+            try:
+                with st.spinner("Processing new file..."):
+                    df = pd.read_excel(main_data_file)
                     
-                    df = geocode_uk_postcodes(df, 'Post Code')
+                    # Clean column names
+                    df.columns = [str(col).strip() for col in df.columns]
+
+                    # Geocoding logic
+                    needs_geocoding = ('Latitude' not in df.columns or 'Longitude' not in df.columns or
+                                       df['Latitude'].isnull().any() or df['Longitude'].isnull().any())
                     
-                    if 'Latitude' in df.columns:
-                        lat_nan_after = df['Latitude'].isnull().sum()
-                        generated_count = lat_nan_before - lat_nan_after
-                        if generated_count > 0:
-                            st.success(f"Successfully generated coordinates for {generated_count} entries.")
-                        if lat_nan_after > 0:
-                            st.warning(f"Could not find coordinates for {lat_nan_after} entries. These will be excluded from the map.")
-                    else:
-                         st.error("Failed to create 'Latitude'/'Longitude' columns during geocoding.")
+                    if needs_geocoding and 'Post Code' in df.columns:
+                        lat_nan_before = df['Latitude'].isnull().sum() if 'Latitude' in df.columns else len(df)
+                        
+                        df = geocode_uk_postcodes(df, 'Post Code')
+                        
+                        if 'Latitude' in df.columns:
+                            lat_nan_after = df['Latitude'].isnull().sum()
+                            generated_count = lat_nan_before - lat_nan_after
+                            if generated_count > 0:
+                                st.success(f"Successfully generated coordinates for {generated_count} entries.")
+                            if lat_nan_after > 0:
+                                st.warning(f"Could not find coordinates for {lat_nan_after} entries. These will be excluded from the map.")
+                        else:
+                             st.error("Failed to create 'Latitude'/'Longitude' columns during geocoding.")
 
-            if 'Care Home Name' in df.columns:
-                df['Care Home Name'] = df['Care Home Name'].astype(str)
+                    if 'Care Home Name' in df.columns:
+                        df['Care Home Name'] = df['Care Home Name'].astype(str)
 
-            st.session_state['df'] = df
-            st.session_state['go_analysis'] = False # Reset analysis state
+                    # 更新 session state
+                    st.session_state['df'] = df
+                    st.session_state['processed_file_name'] = main_data_file.name
+                    st.session_state['go_analysis'] = False # 仅为新文件重置分析状态
+                st.success("File uploaded and processed successfully!")
             
-            st.success("File uploaded and processed successfully!")
-            
+            except Exception as e:
+                st.error(f"Error processing file: {e}")
+                # 出错时清空状态
+                st.session_state['df'] = None
+                st.session_state['processed_file_name'] = None
+
+        # 只要 session state 中有数据，就显示概览和按钮
+        if st.session_state.get('df') is not None:
+            df = st.session_state.df
             # Data overview
             carehome_counts = df['Care Home ID'].value_counts()
             total_count = carehome_counts.sum()
@@ -127,11 +141,12 @@ if step_title == "Upload Data":
                 st.session_state['go_analysis'] = True
                 st.rerun()
 
-        except Exception as e:
-            st.error(f"Error processing file: {e}")
-
-    elif not main_data_file:
+    else:
+        # 如果用户清空了上传文件，则重置所有相关状态
         st.warning("Please upload the main data file to begin analysis.")
+        st.session_state['df'] = None
+        st.session_state['processed_file_name'] = None
+        st.session_state['go_analysis'] = False
 
 # Step 2: Care Home Analysis
 elif step_title == "Care Home Analysis":
