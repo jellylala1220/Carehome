@@ -700,8 +700,8 @@ def calculate_correlation_data(df, min_months=3):
         if len(sub) >= min_months: # 使用可配置的最小月份数
             care_home_name = sub['Care Home Name'].iloc[0]
             
-            # 检查标准差是否为零，避免计算错误
-            if np.isclose(sub['High NEWS Count'].std(), 0) or np.isclose(sub['Usage per Bed'].std(), 0):
+            # 修正: 使用 nunique() 检查输入是否为常数，这比检查std()更稳健
+            if sub['High NEWS Count'].nunique() <= 1 or sub['Usage per Bed'].nunique() <= 1:
                 pr, pp, sr, sp = np.nan, np.nan, np.nan, np.nan
             else:
                 pr, pp = stats.pearsonr(sub['High NEWS Count'], sub['Usage per Bed'])
@@ -726,7 +726,8 @@ def calculate_correlation_data(df, min_months=3):
     overall_corr_stats = {}
     # 确保有足够的数据和方差来计算相关性
     if not full_df.empty and len(full_df) >= 3:
-        if full_df['High NEWS Count'].std() > 0 and full_df['Usage per Bed'].std() > 0:
+        # 同样在这里使用 nunique() 检查
+        if full_df['High NEWS Count'].nunique() > 1 and full_df['Usage per Bed'].nunique() > 1:
             pearson_r, pearson_p = stats.pearsonr(full_df['High NEWS Count'], full_df['Usage per Bed'])
             spearman_r, spearman_p = stats.spearmanr(full_df['High NEWS Count'], full_df['Usage per Bed'])
             overall_corr_stats = {
