@@ -243,11 +243,11 @@ elif step_title == "Care Home Analysis":
             else:
                 st.info("No NEWS2 score data available to display.")
 
-                # --- 保留其他图表 ---
-                st.plotly_chart(plot_high_risk_prop(hi_data, period2), use_container_width=True, key="high_risk_prop")
-                st.plotly_chart(plot_concern_prop(hi_data, period2), use_container_width=True, key="concern_prop")
-                st.plotly_chart(plot_judgement_accuracy(hi_data, period2), use_container_width=True, key="judgement_accuracy")
-                st.plotly_chart(plot_high_score_params(hi_data, period2), use_container_width=True, key="high_score_params")
+            # --- 恢复其他图表 ---
+            st.plotly_chart(plot_high_risk_prop(hi_data, period2), use_container_width=True, key="high_risk_prop")
+            st.plotly_chart(plot_concern_prop(hi_data, period2), use_container_width=True, key="concern_prop")
+            st.plotly_chart(plot_judgement_accuracy(hi_data, period2), use_container_width=True, key="judgement_accuracy")
+            st.plotly_chart(plot_high_score_params(hi_data, period2), use_container_width=True, key="high_score_params")
 
     else:
         st.warning("Please complete Step 1 first by uploading data and entering analysis.")
