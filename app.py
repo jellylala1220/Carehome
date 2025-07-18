@@ -68,8 +68,10 @@ if step_title == "Upload Data":
 
     main_data_file = st.file_uploader("Upload Observation Data (Excel)", type=["xlsx"])
 
-    if main_data_file:
-        # 检查是否上传了一个新文件
+    # --- 改进缓存逻辑 ---
+    # 只有当上传了新文件时，才执行处理逻辑
+    if main_data_file is not None:
+        # 检查是否是与缓存中不同的新文件
         if st.session_state.get('processed_file_name') != main_data_file.name:
             try:
                 with st.spinner("Processing new file..."):
@@ -112,45 +114,49 @@ if step_title == "Upload Data":
                 st.session_state['df'] = None
                 st.session_state['processed_file_name'] = None
 
-        # 只要 session state 中有数据，就显示概览和按钮
-        if st.session_state.get('df') is not None:
-            df = st.session_state.df
-            # Data overview
-            carehome_counts = df['Care Home ID'].value_counts()
-            total_count = carehome_counts.sum()
-            id_to_name = df.drop_duplicates('Care Home ID').set_index('Care Home ID')['Care Home Name'].astype(str).to_dict()
-            table = carehome_counts.reset_index()
-            table.columns = ['Care Home ID', 'Count']
-            table['Care Home Name'] = table['Care Home ID'].map(id_to_name)
-            table['Percentage'] = (table['Count'] / total_count) * 100
-            table = table[['Care Home ID', 'Care Home Name', 'Count', 'Percentage']]
-            table = table.sort_values('Count', ascending=False).reset_index(drop=True)
-            valid_carehomes = table['Care Home ID'].tolist()
-            all_carehomes = set(df['Care Home ID'].unique())
-            invalid_carehomes = all_carehomes - set(valid_carehomes)
-            valid_count_sum = table['Count'].sum()
+    # --- 改进的显示逻辑 ---
+    # 只要缓存中有数据，就显示概览
+    if st.session_state.get('df') is not None:
+        df = st.session_state.df
+        # Data overview
+        st.subheader("Data Overview")
+        carehome_counts = df['Care Home ID'].value_counts()
+        total_count = carehome_counts.sum()
+        id_to_name = df.drop_duplicates('Care Home ID').set_index('Care Home ID')['Care Home Name'].astype(str).to_dict()
+        table = carehome_counts.reset_index()
+        table.columns = ['Care Home ID', 'Count']
+        table['Care Home Name'] = table['Care Home ID'].map(id_to_name)
+        table['Percentage'] = (table['Count'] / total_count) * 100
+        table = table[['Care Home ID', 'Care Home Name', 'Count', 'Percentage']]
+        table = table.sort_values('Count', ascending=False).reset_index(drop=True)
+        valid_carehomes = table['Care Home ID'].tolist()
+        all_carehomes = set(df['Care Home ID'].unique())
+        invalid_carehomes = all_carehomes - set(valid_carehomes)
+        valid_count_sum = table['Count'].sum()
 
-            col1, col2, col3 = st.columns(3)
-            col1.metric("Number of Valid Care Homes", len(valid_carehomes))
-            col2.metric("Number of Invalid Care Homes", len(invalid_carehomes))
-            col3.metric("Total Valid Observations", valid_count_sum)
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Number of Valid Care Homes", len(valid_carehomes))
+        col2.metric("Number of Invalid Care Homes", len(invalid_carehomes))
+        col3.metric("Total Valid Observations", valid_count_sum)
 
-            st.subheader("Care Home Observation Counts (Descending)")
-            st.dataframe(
-                table.style.format({'Percentage': '{:.1f}%'}),
-                use_container_width=True
-            )
+        st.subheader("Care Home Observation Counts (Descending)")
+        st.dataframe(
+            table.style.format({'Percentage': '{:.1f}%'}),
+            use_container_width=True
+        )
 
-            if st.button("Enter Analysis"):
-                st.session_state['go_analysis'] = True
-                st.rerun()
+        if st.button("Enter Analysis"):
+            st.session_state['go_analysis'] = True
+            st.rerun()
 
-    else:
-        # 如果用户清空了上传文件，则重置所有相关状态
+    # 仅当既没有上传文件，缓存也为空时，才显示警告
+    elif main_data_file is None:
         st.warning("Please upload the main data file to begin analysis.")
+        # 在这里确保清理状态，以防用户明确删除了文件
         st.session_state['df'] = None
         st.session_state['processed_file_name'] = None
         st.session_state['go_analysis'] = False
+
 
 # Step 2: Care Home Analysis
 elif step_title == "Care Home Analysis":
@@ -427,6 +433,16 @@ elif step_title == "Prediction Visualization":
                 
                 full_hist_ch = actual_counts[actual_counts['Care Home ID'] == care_home_id]
                 pred_ch = care_home_data_to_plot
+                
+                # --- 新增：为当前护理院的所有图表计算一个统一的Y轴范围 ---
+                max_y_hist = full_hist_ch['Actual'].max()
+                max_y_pred = pred_ch['95% Upper'].max()
+                max_y_hist = 0 if pd.isna(max_y_hist) else max_y_hist
+                max_y_pred = 0 if pd.isna(max_y_pred) else max_y_pred
+                overall_max_y = max(max_y_hist, max_y_pred)
+                # 设置一个最小范围5，并增加15%的顶部空间，确保图表不会被压扁
+                yaxis_range = [0, max(5, overall_max_y * 1.15)] 
+
                 score_list = sorted(pred_ch['NEWS2 Score'].unique())
 
                 for score in score_list:
@@ -484,7 +500,8 @@ elif step_title == "Prediction Visualization":
                         title=f'NEWS2 Score = {score}',
                         xaxis_title='Month',
                         yaxis_title='Monthly Count',
-                        showlegend=True
+                        showlegend=True,
+                        yaxis=dict(range=yaxis_range) # 应用固定的Y轴范围
                     )
                     st.plotly_chart(fig, use_container_width=True, key=f"plot_{care_home_id}_{score}")
         elif not upload_pred_file:
