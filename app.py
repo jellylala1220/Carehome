@@ -636,7 +636,7 @@ elif step_title == "Benchmark Grouping":
                 fig_map.update_layout(
                     legend_title_text='High Usage Frequency',
                     margin={"r":0,"t":0,"l":0,"b":0},
-                    height=700 # 增加地图高度
+                    height=1000 # 增加地图高度
                 )
                 st.plotly_chart(fig_map, use_container_width=True)
 
@@ -767,20 +767,69 @@ elif step_title == "Correlation Analysis":
         if 'NEWS2 score' not in df.columns or 'No of Beds' not in df.columns:
             st.error("Source data must contain 'NEWS2 score' and 'No of Beds' columns for this analysis.")
         else:
+            # --- 新增：允许用户设置最小月份数 ---
+            st.sidebar.subheader("Correlation Settings")
+            min_months_for_corr = st.sidebar.number_input(
+                "Minimum months of data required per care home",
+                min_value=2,
+                max_value=24,
+                value=3,
+                step=1,
+                help="Only care homes with at least this many months of data will be included in the correlation analysis."
+            )
+
             with st.spinner("Calculating monthly data and correlations..."):
-                monthly_corr_df, corr_summary_df = calculate_correlation_data(df)
+                monthly_corr_df, corr_summary_df, overall_stats = calculate_correlation_data(df, min_months=min_months_for_corr)
 
             if corr_summary_df.empty:
-                st.info("Not enough data to generate correlation analysis. Each care home needs at least 3 months of data with valid observations.")
+                st.info(f"Not enough data to generate correlation analysis. No care homes found with at least {min_months_for_corr} months of data.")
             else:
-                # Part A: Correlation Analysis
-                st.subheader("A. Correlation Coefficient Summary")
+                # --- 新增：总体相关性分析 ---
+                st.subheader("B. Overall Correlation Analysis")
+                if overall_stats:
+                    col1, col2 = st.columns(2)
+                    col1.metric("Overall Pearson's r", f"{overall_stats['Pearson r']:.3f}")
+                    col2.metric("p-value", f"{overall_stats['Pearson p-value']:.3f}")
+
+                    fig_scatter = px.scatter(
+                        monthly_corr_df,
+                        x="Usage per Bed",
+                        y="High NEWS Count",
+                        hover_name="Care Home Name",
+                        hover_data=["Month"],
+                        title="High NEWS Count vs. Usage Per Bed (All Care Homes)",
+                        labels={"Usage per Bed": "Average Usage per Bed", "High NEWS Count": "High NEWS (≥6) Count"},
+                        trendline="ols", # 添加普通最小二乘趋势线
+                        trendline_color_override="red"
+                    )
+                    st.plotly_chart(fig_scatter, use_container_width=True)
+                else:
+                    st.info("Could not calculate overall correlation due to insufficient data or lack of variance.")
+                
+                st.markdown("---")
+
+                # Part C: Per-Care-Home Analysis
+                st.subheader("C. Correlation Coefficient Summary (Per Care Home)")
                 st.markdown("This table shows the Pearson and Spearman correlation coefficients between 'High NEWS Count' and 'Usage per Bed' for each care home.")
                 
                 st.dataframe(corr_summary_df.style.format({
                     'Pearson r': '{:.3f}', 'Pearson p-value': '{:.3f}',
                     'Spearman r': '{:.3f}', 'Spearman p-value': '{:.3f}'
                 }), use_container_width=True)
+
+                # --- 新增：p-value 解释 ---
+                st.markdown(
+                    """
+                    <div style="font-size: 0.9em; margin-top: 1em;">
+                    <strong>Note on p-value interpretation:</strong>
+                    <ul>
+                    <li><b>p-value < 0.05</b>: The correlation is statistically significant.</li>
+                    <li><b>p-value ≥ 0.05</b>: The correlation is not statistically significant.</li>
+                    </ul>
+                    </div>
+                    """,
+                    unsafe_allow_html=True
+                )
 
                 csv = corr_summary_df.to_csv(index=False).encode('utf-8')
                 st.download_button(
@@ -792,8 +841,8 @@ elif step_title == "Correlation Analysis":
 
                 st.markdown("---")
 
-                # Part B: Trend Visualization
-                st.subheader("B. Trend Visualization")
+                # Part D: Trend Visualization
+                st.subheader("D. Trend Visualization (Per Care Home)")
                 st.markdown("Select a care home to visualize the monthly trend of 'High NEWS Count' and 'Usage per Bed'.")
 
                 care_home_map = (

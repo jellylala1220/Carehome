@@ -661,15 +661,15 @@ def geocode_uk_postcodes(df, postcode_column='Post Code'):
     
     return df_copy
 
-def calculate_correlation_data(df):
+def calculate_correlation_data(df, min_months=3):
 
     """
     计算高NEWS数与每床使用量的相关性.
     此函数基于用户提供的逻辑实现。
-    返回包含月度数据的DataFrame和包含相关系数的DataFrame.
+    返回包含月度数据的DataFrame, 包含相关系数的DataFrame, 以及总体相关性统计。
     """
     if 'NEWS2 score' not in df.columns or 'No of Beds' not in df.columns:
-        return pd.DataFrame(), pd.DataFrame()
+        return pd.DataFrame(), pd.DataFrame(), {}
 
     df_copy = df.copy()
     df_copy['Date/Time'] = pd.to_datetime(df_copy['Date/Time'])
@@ -697,7 +697,7 @@ def calculate_correlation_data(df):
     for care_home_id in full_df['Care Home ID'].unique():
         sub = full_df[full_df['Care Home ID'] == care_home_id]
         
-        if len(sub) >= 3: # 至少需要3个数据点来计算有意义的相关性
+        if len(sub) >= min_months: # 使用可配置的最小月份数
             care_home_name = sub['Care Home Name'].iloc[0]
             
             # 检查标准差是否为零，避免计算错误
@@ -722,6 +722,20 @@ def calculate_correlation_data(df):
     # 将月份转为字符串以便绘图
     full_df['Month'] = full_df['Month'].astype(str)
 
-    return full_df, corr_df
+    # --- 新增：计算总体相关性 ---
+    overall_corr_stats = {}
+    # 确保有足够的数据和方差来计算相关性
+    if not full_df.empty and len(full_df) >= 3:
+        if full_df['High NEWS Count'].std() > 0 and full_df['Usage per Bed'].std() > 0:
+            pearson_r, pearson_p = stats.pearsonr(full_df['High NEWS Count'], full_df['Usage per Bed'])
+            spearman_r, spearman_p = stats.spearmanr(full_df['High NEWS Count'], full_df['Usage per Bed'])
+            overall_corr_stats = {
+                'Pearson r': pearson_r,
+                'Pearson p-value': pearson_p,
+                'Spearman r': spearman_r,
+                'Spearman p-value': spearman_p,
+            }
+
+    return full_df, corr_df, overall_corr_stats
 
 
