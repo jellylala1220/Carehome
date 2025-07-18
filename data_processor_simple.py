@@ -103,8 +103,8 @@ def process_health_insights(df, care_home_id, period):
     if care_home_data.empty or 'NEWS2 score' not in care_home_data.columns:
         return {}
 
-    # 确保生理参数列是数值类型
-    physio_cols = [col for col in care_home_data.columns if col.endswith('_New')]
+    # 修正: 使用 PHYSIO_COLS 常量来确保所有相关参数都被包括
+    physio_cols = [col for col in PHYSIO_COLS if col in care_home_data.columns]
     for col in physio_cols:
         care_home_data[col] = pd.to_numeric(care_home_data[col], errors='coerce')
 
@@ -128,26 +128,34 @@ def process_health_insights(df, care_home_id, period):
     judgement_accuracy = {}
     param_trigger_data = {}
 
-    # --- 新增：计算参数触发率 ---
+    # --- 计算参数触发率 ---
     high_risk_data = care_home_data[care_home_data['NEWS2 score'] >= 6]
     if not high_risk_data.empty:
-        # 按相同的时间粒度分组
         high_risk_grouped = high_risk_data.groupby(grouper)
         for period_name, group in high_risk_grouped:
-            period_key = period_name.to_timestamp() if not isinstance(period_name, pd.Timestamp) else period_name
+            # 修正: 正确处理不同时间粒度的索引
+            if period == 'Daily':
+                period_key = pd.to_datetime(period_name)
+            else:
+                period_key = period_name.to_timestamp()
             
-            month_result = {}
+            period_result = {}
             for col in physio_cols:
                 if col in group.columns:
-                    month_result[col] = (group[col] > 0).mean() # 计算比例
-            param_trigger_data[period_key] = month_result
+                    period_result[col] = (group[col] > 0).mean() # 计算比例
+            param_trigger_data[period_key] = period_result
 
     param_trigger_df = pd.DataFrame(param_trigger_data).T.sort_index()
-    param_trigger_df = param_trigger_df.dropna(axis=1, how='all') # 删除全为NaN的列
+    if not param_trigger_df.empty:
+        param_trigger_df = param_trigger_df.dropna(axis=1, how='all')
 
     # --- 原有计算 ---
     for period_name, group in grouped:
-        period_key = period_name.to_timestamp() if not isinstance(period_name, pd.Timestamp) else period_name
+        # 修正: 正确处理不同时间粒度的索引
+        if period == 'Daily':
+            period_key = pd.to_datetime(period_name)
+        else:
+            period_key = period_name.to_timestamp()
         
         if 'NEWS2 score' in group.columns:
             news2_counts[period_key] = group['NEWS2 score'].value_counts().sort_index()
@@ -170,7 +178,7 @@ def process_health_insights(df, care_home_id, period):
         'high_risk_prop': pd.Series(high_risk_prop).sort_index(),
         'concern_prop': pd.Series(concern_prop).sort_index(),
         'judgement_accuracy': pd.Series(judgement_accuracy).sort_index(),
-        'param_trigger': param_trigger_df # 返回新的触发率数据
+        'param_trigger': param_trigger_df
     }
 
 def predict_next_month_bayesian(df_carehome, window_length=2, sigma=0.5):
