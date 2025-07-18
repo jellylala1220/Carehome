@@ -393,6 +393,11 @@ elif step_title == "Prediction Visualization":
 
                 for score in score_list:
                     fig = go.Figure()
+                    
+                    # --- 新增：根据分数获取颜色 ---
+                    color_details = get_news2_color(score)
+                    score_color = color_details['background']
+
                     hist_score_df = full_hist_ch[full_hist_ch['NEWS2 Score'] == score].sort_values('Month')
                     if not hist_score_df.empty:
                         fig.add_trace(go.Scatter(
@@ -400,8 +405,8 @@ elif step_title == "Prediction Visualization":
                             y=hist_score_df['Actual'],
                             mode='lines+markers',
                             name='Historical Actual',
-                            line=dict(color='gray'),
-                            marker=dict(symbol='circle')
+                            line=dict(color=score_color), # 修改
+                            marker=dict(symbol='circle', color=score_color) # 修改
                         ))
                     pred_point = pred_ch[pred_ch['NEWS2 Score'] == score]
                     if not pred_point.empty:
@@ -410,13 +415,14 @@ elif step_title == "Prediction Visualization":
                             y=pred_point['Predicted Mean'],
                             mode='markers',
                             name='Prediction',
-                            marker=dict(color='blue', size=12, symbol='diamond'),
+                            marker=dict(color=score_color, size=12, symbol='diamond'), # 修改
                             error_y=dict(
                                 type='data',
                                 symmetric=False,
                                 array=pred_point['95% Upper'] - pred_point['Predicted Mean'],
                                 arrayminus=pred_point['Predicted Mean'] - pred_point['95% Lower'],
-                                visible=True
+                                visible=True,
+                                color=score_color # 新增
                             )
                         ))
                         if pred_point['Actual'].notna().any():
@@ -425,7 +431,7 @@ elif step_title == "Prediction Visualization":
                                 y=pred_point['Actual'],
                                 mode='markers',
                                 name='Actual (at prediction)',
-                                marker=dict(color='red', size=12, symbol='star')
+                                marker=dict(color='red', size=12, symbol='star') # 保持红色以突出显示
                             ))
                     fig.update_layout(
                         title=f'NEWS2 Score = {score}',
