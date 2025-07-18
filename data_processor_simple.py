@@ -685,6 +685,9 @@ def calculate_correlation_data(df, min_months=3):
     usage = df_copy.groupby(['Care Home ID', 'Care Home Name', 'Month']).size().rename('Obs Count').reset_index()
     yij = usage.merge(beds_info, on='Care Home ID', how='left')
     yij['Usage per Bed'] = yij['Obs Count'] / yij['No of Beds']
+    
+    # 修正: 替换无穷大值(inf)为NaN，然后和原有的NaN一起删除
+    yij.replace([np.inf, -np.inf], np.nan, inplace=True)
     yij.dropna(subset=['Usage per Bed'], inplace=True)
 
     # 合并 xij 和 yij
