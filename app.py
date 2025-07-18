@@ -584,31 +584,29 @@ elif step_title == "Benchmark Grouping":
             if 'Latitude' not in geospatial_df.columns or 'Longitude' not in geospatial_df.columns:
                 st.warning("Geospatial map cannot be generated because 'Latitude' and/or 'Longitude' columns are missing in the source data.")
             else:
-                st.markdown("This map shows each care home's location, colored by its frequency of being a 'High' usage facility (pi value).")
+                st.markdown("This map shows each care home's location, colored by its frequency of being a 'High' usage facility (pi value). Size reflects the magnitude of this frequency.")
 
-                # 修复：使用 qcut 替代 cut 以处理分布不均的数据
-                # 这可以避免 "Bin edges must be unique" 的错误
-                pi_labels = ['Low', 'Medium', 'High']
-                try:
-                    geospatial_df['pi_group'] = pd.qcut(
-                        geospatial_df['pi'], 
-                        q=[0, 0.33, 0.66, 1.0], 
-                        labels=pi_labels, 
-                        duplicates='drop'
-                    )
-                except ValueError:
-                    # 如果由于数据点太少无法分箱，则将所有点归为一类
-                    geospatial_df['pi_group'] = 'Medium'
-
+                # --- 改进：使用固定阈值对 pi 进行分组，以获得更一致的颜色 ---
+                conditions = [
+                    geospatial_df['pi'] == 0,
+                    geospatial_df['pi'] >= 0.5
+                ]
+                choices = ['Low', 'High']
+                geospatial_df['pi_group'] = np.select(conditions, choices, default='Medium')
+                
                 color_map = {'Low': 'red', 'Medium': 'yellow', 'High': 'green'}
+                
+                # --- 改进：创建一个新的列用于大小，确保 pi=0 的点可见且大小差异更明显 ---
+                # 添加一个很小的基数，然后放大，使得大小差异更显著
+                geospatial_df['size'] = (geospatial_df['pi'] * 20) + 5
                 
                 # 创建地图
                 fig_map = px.scatter_mapbox(
-                    geospatial_df,
+                    geospatial_df.dropna(subset=['Latitude', 'Longitude']), # 确保没有NaN的经纬度
                     lat="Latitude",
                     lon="Longitude",
                     color="pi_group",
-                    size="pi",  # 点的大小也反映 pi 值
+                    size="size",  # 使用新的 size 列
                     color_discrete_map=color_map,
                     category_orders={"pi_group": ["Low", "Medium", "High"]},
                     mapbox_style="open-street-map",
@@ -623,8 +621,10 @@ elif step_title == "Benchmark Grouping":
                         # 隐藏不需要的悬停信息
                         "Latitude": False,
                         "Longitude": False,
-                        "pi_group": False
-                    }
+                        "pi_group": False,
+                        "size": False # 不在悬停信息中显示内部的size列
+                    },
+                    size_max=30 # 限制点的最大尺寸
                 )
                 fig_map.update_layout(
                     legend_title_text='High Usage Frequency',
