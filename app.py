@@ -31,6 +31,8 @@ if 'prediction_df' not in st.session_state:
     st.session_state['prediction_df'] = None
 if 'processed_file_name' not in st.session_state:
     st.session_state['processed_file_name'] = None
+if 'batch_prediction_authenticated' not in st.session_state:
+    st.session_state['batch_prediction_authenticated'] = False
 
 # Sidebar navigation - 改用新的 option_menu
 with st.sidebar:
@@ -257,62 +259,91 @@ elif step_title == "Batch Prediction":
     st.title("Care Home Analysis Dashboard")
     st.header("Step 3: Batch Prediction (Offline)")
 
-    if st.session_state['df'] is None:
-        st.warning("Please upload data in Step 1 before running predictions.")
-    else:
-        st.info("This step will run predictions for all care homes with sufficient data (>50 observations) and generate a downloadable CSV file.")
+    def show_password_form():
+        """显示密码输入表单"""
+        st.warning("This module is password protected. Please enter the password to continue.")
+        # 在实际应用中，应使用 st.secrets 来安全地存储密码
+        CORRECT_PASSWORD = "admin"
+        
+        with st.form("password_form"):
+            password = st.text_input("Password", type="password")
+            submitted = st.form_submit_button("Authenticate")
 
-        st.subheader("Prediction Parameters")
-        min_obs = st.number_input("Minimum observations required per care home", min_value=1, value=50, step=10)
-        window_length = st.slider("Moving average window (months)", min_value=1, max_value=12, value=2)
-        sigma = st.slider("Prior belief variance (sigma)", min_value=0.1, max_value=2.0, value=0.5, step=0.1)
-
-        if st.button("Start Batch Prediction"):
-            df = st.session_state['df']
-            obs_counts = df['Care Home ID'].value_counts()
-            valid_care_homes = obs_counts[obs_counts > min_obs].index.tolist()
-
-            if not valid_care_homes:
-                st.error(f"No care homes found with more than {min_obs} observations.")
-            else:
-                all_predictions = []
-                id_to_name = df.drop_duplicates('Care Home ID').set_index('Care Home ID')['Care Home Name'].to_dict()
-
-                progress_bar = st.progress(0)
-                status_text = st.empty()
-
-                for i, care_home_id in enumerate(valid_care_homes):
-                    care_home_name = id_to_name.get(care_home_id, "Unknown")
-                    status_text.text(f"Processing: {care_home_name} ({i+1}/{len(valid_care_homes)})...")
-                    df_carehome = df[df['Care Home ID'] == care_home_id]
-                    pred_df, target_month = predict_next_month_bayesian(df_carehome, window_length, sigma)
-
-                    if not pred_df.empty:
-                        pred_df['Care Home ID'] = care_home_id
-                        pred_df['Care Home Name'] = care_home_name
-                        pred_df['Month'] = target_month
-                        all_predictions.append(pred_df)
-
-                    progress_bar.progress((i + 1) / len(valid_care_homes))
-
-                status_text.success("Batch prediction complete!")
-
-                if all_predictions:
-                    final_pred_df = pd.concat(all_predictions, ignore_index=True)
-                    st.session_state['prediction_df'] = final_pred_df
-                    st.subheader("Prediction Results Preview")
-                    st.dataframe(final_pred_df.head())
+            if submitted:
+                if password == CORRECT_PASSWORD:
+                    st.session_state["batch_prediction_authenticated"] = True
+                    st.rerun()
                 else:
-                    st.warning("Prediction could not be generated for any care home. This might be due to insufficient historical data (e.g., less than the window length).")
+                    st.error("The password you entered is incorrect.")
 
-    if st.session_state['prediction_df'] is not None:
-        csv = st.session_state['prediction_df'].to_csv(index=False)
-        st.download_button(
-            label="Download Prediction Results (.csv)",
-            data=csv,
-            file_name=f"batch_prediction_results_{pd.Timestamp.now().strftime('%Y%m%d')}.csv",
-            mime="text/csv",
-        )
+    def show_batch_prediction_page():
+        """显示批量预测页面的实际内容"""
+        # 在侧边栏添加一个登出/锁定按钮
+        st.sidebar.button("Lock Batch Prediction Page", on_click=lambda: st.session_state.update(batch_prediction_authenticated=False))
+
+        if st.session_state['df'] is None:
+            st.warning("Please upload data in Step 1 before running predictions.")
+        else:
+            st.info("This step will run predictions for all care homes with sufficient data (>50 observations) and generate a downloadable CSV file.")
+
+            st.subheader("Prediction Parameters")
+            min_obs = st.number_input("Minimum observations required per care home", min_value=1, value=50, step=10)
+            window_length = st.slider("Moving average window (months)", min_value=1, max_value=12, value=2)
+            sigma = st.slider("Prior belief variance (sigma)", min_value=0.1, max_value=2.0, value=0.5, step=0.1)
+
+            if st.button("Start Batch Prediction"):
+                df = st.session_state['df']
+                obs_counts = df['Care Home ID'].value_counts()
+                valid_care_homes = obs_counts[obs_counts > min_obs].index.tolist()
+
+                if not valid_care_homes:
+                    st.error(f"No care homes found with more than {min_obs} observations.")
+                else:
+                    all_predictions = []
+                    id_to_name = df.drop_duplicates('Care Home ID').set_index('Care Home ID')['Care Home Name'].to_dict()
+
+                    progress_bar = st.progress(0)
+                    status_text = st.empty()
+
+                    for i, care_home_id in enumerate(valid_care_homes):
+                        care_home_name = id_to_name.get(care_home_id, "Unknown")
+                        status_text.text(f"Processing: {care_home_name} ({i+1}/{len(valid_care_homes)})...")
+                        df_carehome = df[df['Care Home ID'] == care_home_id]
+                        pred_df, target_month = predict_next_month_bayesian(df_carehome, window_length, sigma)
+
+                        if not pred_df.empty:
+                            pred_df['Care Home ID'] = care_home_id
+                            pred_df['Care Home Name'] = care_home_name
+                            pred_df['Month'] = target_month
+                            all_predictions.append(pred_df)
+
+                        progress_bar.progress((i + 1) / len(valid_care_homes))
+
+                    status_text.success("Batch prediction complete!")
+
+                    if all_predictions:
+                        final_pred_df = pd.concat(all_predictions, ignore_index=True)
+                        st.session_state['prediction_df'] = final_pred_df
+                        st.subheader("Prediction Results Preview")
+                        st.dataframe(final_pred_df.head())
+                    else:
+                        st.warning("Prediction could not be generated for any care home. This might be due to insufficient historical data (e.g., less than the window length).")
+
+        if st.session_state['prediction_df'] is not None:
+            csv = st.session_state['prediction_df'].to_csv(index=False)
+            st.download_button(
+                label="Download Prediction Results (.csv)",
+                data=csv,
+                file_name=f"batch_prediction_results_{pd.Timestamp.now().strftime('%Y%m%d')}.csv",
+                mime="text/csv",
+            )
+
+    # --- 主逻辑：根据认证状态显示密码表单或页面内容 ---
+    if st.session_state.get("batch_prediction_authenticated", False):
+        show_batch_prediction_page()
+    else:
+        show_password_form()
+
 
 # Step 4: Prediction Visualization
 elif step_title == "Prediction Visualization":
