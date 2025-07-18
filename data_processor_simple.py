@@ -98,50 +98,69 @@ def process_health_insights(df, care_home_id, period):
     """处理健康洞察数据"""
     care_home_id = str(care_home_id).strip()
     df['Care Home ID'] = df['Care Home ID'].astype(str).str.strip()
-    care_home_data = df[df['Care Home ID'] == care_home_id]
-    
+    care_home_data = df[df['Care Home ID'] == care_home_id].copy()
+
     if care_home_data.empty or 'NEWS2 score' not in care_home_data.columns:
         return {}
-    
+
+    # 确保生理参数列是数值类型
+    physio_cols = [col for col in care_home_data.columns if col.endswith('_New')]
+    for col in physio_cols:
+        care_home_data[col] = pd.to_numeric(care_home_data[col], errors='coerce')
+
     dt_col = pd.to_datetime(care_home_data['Date/Time'])
     
     if period == 'Daily':
-        grouped = care_home_data.groupby(dt_col.dt.date)
+        grouper = dt_col.dt.date
     elif period == 'Weekly':
-        grouped = care_home_data.groupby(dt_col.dt.to_period('W'))
+        grouper = dt_col.dt.to_period('W')
     elif period == 'Monthly':
-        grouped = care_home_data.groupby(dt_col.dt.to_period('M'))
+        grouper = dt_col.dt.to_period('M')
     else:  # Yearly
-        grouped = care_home_data.groupby(dt_col.dt.to_period('Y'))
+        grouper = dt_col.dt.to_period('Y')
     
-    # 计算各种指标
+    grouped = care_home_data.groupby(grouper)
+    
+    # 初始化结果存储
     news2_counts = {}
     high_risk_prop = {}
     concern_prop = {}
     judgement_accuracy = {}
-    
+    param_trigger_data = {}
+
+    # --- 新增：计算参数触发率 ---
+    high_risk_data = care_home_data[care_home_data['NEWS2 score'] >= 6]
+    if not high_risk_data.empty:
+        # 按相同的时间粒度分组
+        high_risk_grouped = high_risk_data.groupby(grouper)
+        for period_name, group in high_risk_grouped:
+            period_key = period_name.to_timestamp() if not isinstance(period_name, pd.Timestamp) else period_name
+            
+            month_result = {}
+            for col in physio_cols:
+                if col in group.columns:
+                    month_result[col] = (group[col] > 0).mean() # 计算比例
+            param_trigger_data[period_key] = month_result
+
+    param_trigger_df = pd.DataFrame(param_trigger_data).T.sort_index()
+    param_trigger_df = param_trigger_df.dropna(axis=1, how='all') # 删除全为NaN的列
+
+    # --- 原有计算 ---
     for period_name, group in grouped:
-        if period == 'Daily':
-            period_key = pd.to_datetime(period_name)
-        else:
-            period_key = period_name.to_timestamp()
+        period_key = period_name.to_timestamp() if not isinstance(period_name, pd.Timestamp) else period_name
         
-        # NEWS2 分数计数
         if 'NEWS2 score' in group.columns:
             news2_counts[period_key] = group['NEWS2 score'].value_counts().sort_index()
         
-        # 高风险比例 (NEWS2 >= 6)
         if 'NEWS2 score' in group.columns:
             high_risk_prop[period_key] = (group['NEWS2 score'] >= 6).mean()
         
-        # Clinical concern 比例
         if 'Clinical concern?' in group.columns:
             concern_prop[period_key] = (group['Clinical concern?'] == 'Yes').mean()
         
-        # Clinical judgement 准确率
         if 'Clinical concern?' in group.columns and 'NEWS2 score' in group.columns:
             concern_data = group[group['Clinical concern?'] == 'Yes']
-            if len(concern_data) > 0:
+            if not concern_data.empty:
                 judgement_accuracy[period_key] = (concern_data['NEWS2 score'] >= 6).mean()
             else:
                 judgement_accuracy[period_key] = 0
@@ -150,7 +169,8 @@ def process_health_insights(df, care_home_id, period):
         'news2_counts': pd.DataFrame(news2_counts).T.sort_index(),
         'high_risk_prop': pd.Series(high_risk_prop).sort_index(),
         'concern_prop': pd.Series(concern_prop).sort_index(),
-        'judgement_accuracy': pd.Series(judgement_accuracy).sort_index()
+        'judgement_accuracy': pd.Series(judgement_accuracy).sort_index(),
+        'param_trigger': param_trigger_df # 返回新的触发率数据
     }
 
 def predict_next_month_bayesian(df_carehome, window_length=2, sigma=0.5):
@@ -430,13 +450,37 @@ def plot_judgement_accuracy(hi_data, period):
     return fig
 
 def plot_high_score_params(hi_data, period):
-    """绘制高分参数图"""
-    # 简化版本，返回空图
+    """绘制高分参数触发率的时间序列图"""
+    df = hi_data.get('param_trigger')
+    
+    if df is None or df.empty:
+        fig = go.Figure()
+        fig.update_layout(
+            title=f'High NEWS2 Score Parameter Trigger Rate ({period})',
+            annotations=[{
+                "text": "No high-score (NEWS2 ≥ 6) events to analyze for the selected period.",
+                "xref": "paper", "yref": "paper",
+                "showarrow": False, "font": {"size": 16}
+            }]
+        )
+        return fig
+
     fig = go.Figure()
+    for col in df.columns:
+        fig.add_trace(go.Scatter(
+            x=df.index, 
+            y=df[col].fillna(0) * 100, # 填充NaN以连接线条，并转换为百分比
+            mode='lines+markers', 
+            name=col.replace('_New', '') # 清理图例标签
+        ))
+        
     fig.update_layout(
-        title=f'High Score Parameters ({period})',
-        xaxis_title='Parameter',
-        yaxis_title='Value'
+        title=f'High NEWS2 Score Parameter Trigger Rate ({period})',
+        xaxis_title='Time',
+        yaxis_title='Trigger Rate (%)',
+        yaxis=dict(range=[0, 101], tickformat='.0f'),
+        hovermode='x unified',
+        legend_title_text='Parameter'
     )
     return fig
 
@@ -609,6 +653,7 @@ def geocode_uk_postcodes(df, postcode_column='Post Code'):
     return df_copy
 
 def calculate_correlation_data(df):
+
     """
     计算高NEWS数与每床使用量的相关性.
     此函数基于用户提供的逻辑实现。
@@ -669,3 +714,5 @@ def calculate_correlation_data(df):
     full_df['Month'] = full_df['Month'].astype(str)
 
     return full_df, corr_df
+
+
