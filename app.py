@@ -399,22 +399,31 @@ elif step_title == "Prediction Visualization":
                 score_list = sorted(pred_ch['NEWS2 Score'].unique())
 
                 for score in score_list:
+                    # --- 改进：在绘图前先检查历史数据 ---
+                    hist_score_df = full_hist_ch[full_hist_ch['NEWS2 Score'] == score].sort_values('Month')
+
+                    # 如果该分数没有任何历史数据，则显示一条信息并跳过
+                    if hist_score_df.empty:
+                        st.markdown(f"**NEWS2 Score = {score}:** No historical data available, so no chart is generated.")
+                        continue
+                    
+                    # --- 如果有数据，则继续绘图 ---
                     fig = go.Figure()
                     
-                    # --- 新增：根据分数获取颜色 ---
+                    # --- 根据分数获取颜色 ---
                     color_details = get_news2_color(score)
                     score_color = color_details['background']
 
-                    hist_score_df = full_hist_ch[full_hist_ch['NEWS2 Score'] == score].sort_values('Month')
-                    if not hist_score_df.empty:
-                        fig.add_trace(go.Scatter(
-                            x=hist_score_df['Month'],
-                            y=hist_score_df['Actual'],
-                            mode='lines+markers',
-                            name='Historical Actual',
-                            line=dict(color=score_color), # 修改
-                            marker=dict(symbol='circle', color=score_color) # 修改
-                        ))
+                    # 因为已经确认 hist_score_df 非空，所以可以直接添加 trace
+                    fig.add_trace(go.Scatter(
+                        x=hist_score_df['Month'],
+                        y=hist_score_df['Actual'],
+                        mode='lines+markers',
+                        name='Historical Actual',
+                        line=dict(color=score_color),
+                        marker=dict(symbol='circle', color=score_color)
+                    ))
+
                     pred_point = pred_ch[pred_ch['NEWS2 Score'] == score]
                     if not pred_point.empty:
                         fig.add_trace(go.Scatter(
@@ -693,7 +702,7 @@ elif step_title == "Regional Analysis":
                 
                 sorted_months = sorted(monthly_df['Month'].unique())
 
-                st.subheader(f"A. Monthly Usage per Bed by Area {regional_title_suffix}")
+                st.subheader(f"Part 1. Monthly Usage per Bed by Area {regional_title_suffix}")
                 st.markdown("This boxplot shows the distribution of 'average usage per bed' across all care homes within each area, for each month.")
                 fig_box = px.box(
                     monthly_df,
@@ -708,7 +717,7 @@ elif step_title == "Regional Analysis":
 
                 st.markdown("---")
 
-                st.subheader("B. Area Benchmark Grouping Percentage")
+                st.subheader("Part 2. Area Benchmark Grouping Percentage")
                 st.markdown("This chart shows the percentage of care homes in each benchmark group (High/Medium/Low) for each area, on a monthly basis.")
 
                 summary = monthly_df.groupby(['Month', 'Area', 'Group'])['Care Home ID'].nunique().reset_index()
@@ -738,7 +747,7 @@ elif step_title == "Regional Analysis":
                 
                 st.markdown("---")
 
-                st.subheader("C. Detailed Grouping Data")
+                st.subheader("Part 3. Detailed Grouping Data")
                 st.markdown("This table provides the detailed numbers and percentages used for the benchmark grouping chart above.")
                 
                 display_summary = summary[['Month', 'Area', 'Group', 'Count', 'Total', 'Percentage']].copy()
@@ -785,7 +794,7 @@ elif step_title == "Correlation Analysis":
                 st.info(f"Not enough data to generate correlation analysis. No care homes found with at least {min_months_for_corr} months of data.")
             else:
                 # --- 新增：总体相关性分析 ---
-                st.subheader("B. Overall Correlation Analysis")
+                st.subheader("Section 1. Overall Correlation Analysis")
                 if overall_stats:
                     col1, col2 = st.columns(2)
                     col1.metric("Overall Pearson's r", f"{overall_stats['Pearson r']:.3f}")
@@ -809,7 +818,7 @@ elif step_title == "Correlation Analysis":
                 st.markdown("---")
 
                 # Part C: Per-Care-Home Analysis
-                st.subheader("C. Correlation Coefficient Summary (Per Care Home)")
+                st.subheader("Section 2. Correlation Coefficient Summary (Per Care Home)")
                 st.markdown("This table shows the Pearson and Spearman correlation coefficients between 'High NEWS Count' and 'Usage per Bed' for each care home.")
                 
                 st.dataframe(corr_summary_df.style.format({
@@ -842,7 +851,7 @@ elif step_title == "Correlation Analysis":
                 st.markdown("---")
 
                 # Part D: Trend Visualization
-                st.subheader("D. Trend Visualization (Per Care Home)")
+                st.subheader("Section 3. Trend Visualization (Per Care Home)")
                 st.markdown("Select a care home to visualize the monthly trend of 'High NEWS Count' and 'Usage per Bed'.")
 
                 care_home_map = (
