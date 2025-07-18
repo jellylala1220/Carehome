@@ -345,19 +345,50 @@ elif step_title == "Prediction Visualization":
                 how='left',
                 on=['Care Home ID', 'Care Home Name', 'Month', 'NEWS2 Score']
             )
-
-            st.subheader("Combined Prediction and Actual Data")
-            st.dataframe(merged_df, use_container_width=True)
-            st.subheader("Time Series Visualization (for all Care Homes)")
+            
             merged_df['Care Home Display'] = merged_df['Care Home ID'].astype(str) + " | " + merged_df['Care Home Name'].astype(str)
-            care_home_options = sorted(merged_df['Care Home Display'].unique())
 
-            for care_home_display in care_home_options:
+            # --- 新增：护理院选择下拉菜单 ---
+            st.subheader("Filter by Care Home")
+            all_care_homes_option = "All Care Homes"
+            care_home_options = [all_care_homes_option] + sorted(merged_df['Care Home Display'].unique())
+            
+            selected_care_home = st.selectbox(
+                "Select a care home to view its specific data and charts:",
+                options=care_home_options
+            )
+
+            # --- 根据选择筛选数据 ---
+            if selected_care_home == all_care_homes_option:
+                display_df = merged_df
+                care_homes_to_plot = sorted(merged_df['Care Home Display'].unique())
+            else:
+                display_df = merged_df[merged_df['Care Home Display'] == selected_care_home]
+                care_homes_to_plot = [selected_care_home]
+            
+            # --- 修改：显示重新排序和筛选后的表格 ---
+            st.subheader("Combined Prediction and Actual Data")
+            
+            # 重新排序，将关键列放在前面
+            front_cols = ['Care Home ID', 'Care Home Name', 'Month']
+            other_cols = [col for col in display_df.columns if col not in front_cols and col != 'Care Home Display']
+            display_df_ordered = display_df[front_cols + other_cols]
+            
+            st.dataframe(display_df_ordered, use_container_width=True)
+
+            # --- 修改：根据筛选结果显示图表 ---
+            st.subheader("Time Series Visualization")
+
+            for care_home_display in care_homes_to_plot:
                 st.markdown(f"---")
                 st.markdown(f"### {care_home_display}")
-                care_home_id = merged_df[merged_df['Care Home Display'] == care_home_display]['Care Home ID'].iloc[0]
+                
+                # 从已筛选的DataFrame中获取数据，而不是从原始的merged_df中获取
+                care_home_data_to_plot = display_df[display_df['Care Home Display'] == care_home_display]
+                care_home_id = care_home_data_to_plot['Care Home ID'].iloc[0]
+                
                 full_hist_ch = actual_counts[actual_counts['Care Home ID'] == care_home_id]
-                pred_ch = merged_df[merged_df['Care Home ID'] == care_home_id]
+                pred_ch = care_home_data_to_plot
                 score_list = sorted(pred_ch['NEWS2 Score'].unique())
 
                 for score in score_list:
