@@ -600,11 +600,18 @@ elif step_title == "Benchmark Grouping":
                 # 添加一个很小的基数，然后放大，使得大小差异更显著
                 geospatial_df['size'] = (geospatial_df['pi'] * 20) + 5
                 
+                # --- 新增：为重叠点添加“抖动”以改善可见性 ---
+                # 定义抖动幅度 (约等于 +/- 200米)
+                jitter_amount = 0.002
+                # 创建带有随机抖动的新坐标列
+                geospatial_df['lat_jittered'] = geospatial_df['Latitude'] + np.random.uniform(-jitter_amount, jitter_amount, size=len(geospatial_df))
+                geospatial_df['lon_jittered'] = geospatial_df['Longitude'] + np.random.uniform(-jitter_amount, jitter_amount, size=len(geospatial_df))
+
                 # 创建地图
                 fig_map = px.scatter_mapbox(
                     geospatial_df.dropna(subset=['Latitude', 'Longitude']), # 确保没有NaN的经纬度
-                    lat="Latitude",
-                    lon="Longitude",
+                    lat="lat_jittered", # 使用抖动后的纬度
+                    lon="lon_jittered", # 使用抖动后的经度
                     color="pi_group",
                     size="size",  # 使用新的 size 列
                     color_discrete_map=color_map,
@@ -628,7 +635,8 @@ elif step_title == "Benchmark Grouping":
                 )
                 fig_map.update_layout(
                     legend_title_text='High Usage Frequency',
-                    margin={"r":0,"t":0,"l":0,"b":0}
+                    margin={"r":0,"t":0,"l":0,"b":0},
+                    height=700 # 增加地图高度
                 )
                 st.plotly_chart(fig_map, use_container_width=True)
 
