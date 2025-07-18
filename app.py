@@ -158,81 +158,90 @@ elif step_title == "Care Home Analysis":
     if st.session_state['df'] is not None and st.session_state['go_analysis']:
         df = st.session_state['df']
 
-        st.sidebar.header("Step 2: Select Analysis Type")
-        analysis_mode = st.sidebar.radio("Analysis Level", options=["Care Home Level Analysis", "Regional Analysis"], index=0)
+        # 移除侧边栏的分析类型选择
+        # analysis_mode = st.sidebar.radio("Analysis Level", options=["Care Home Level Analysis", "Regional Analysis"], index=0)
 
-        if analysis_mode == "Care Home Level Analysis":
-            df['Care Home Display'] = df['Care Home ID'].astype(str) + " | " + df['Care Home Name'].astype(str)
-            care_home_map = (
-                df[['Care Home ID', 'Care Home Display']]
-                .drop_duplicates()
-                .set_index('Care Home ID')['Care Home Display']
-                .to_dict()
-            )
-            care_home_id = st.sidebar.selectbox(
-                "Select Care Home",
-                options=sorted(list(care_home_map.keys())), # Sort for better UI
-                format_func=lambda x: care_home_map[x]
-            )
-            care_home = care_home_id
-            care_home_info = get_care_home_info(df, care_home)
-            beds = care_home_info.get('beds', 10)
-            
-            with st.expander("Care Home Basic Information", expanded=True):
-                st.markdown(f"**Name:** {care_home}")
-                st.markdown(f"**Number of Beds:** {beds}")
-                st.markdown(f"**Number of Observations:** {care_home_info.get('obs_count', 'N/A')}")
-                st.markdown(f"**Data Time Range:** {care_home_info.get('date_range', 'N/A')}")
-            
-            tab1, tab2 = st.tabs(["Usage Analysis", "Health Insights"])
+        # 默认进入 "Care Home Level Analysis" 逻辑
         
-            with tab1:
-                st.header("Usage Analysis")
-                period = st.selectbox("Time Granularity", ["Daily", "Weekly", "Monthly", "Yearly"], index=2, key="usage_period")
-                usage_df = process_usage_data(df, care_home, beds, period)
-                st.plotly_chart(plot_usage_counts(usage_df, period), use_container_width=True, key="usage_counts")
-                st.plotly_chart(plot_usage_per_bed(usage_df, period), use_container_width=True, key="usage_per_bed")
-                if period == "Monthly":
-                    # This import is fine here as it's specific to this block
-                    from data_processor_simple import calculate_coverage_percentage
-                    coverage_df = calculate_coverage_percentage(df[df['Care Home ID'] == care_home])
-                    st.plotly_chart(plot_coverage(coverage_df), use_container_width=True, key="coverage")
-                else:
-                    st.info("Coverage % is only displayed in Monthly mode.")
+        # --- 将护理院选择器从侧边栏移到主页面 ---
+        st.subheader("Select Care Home to Analyze")
+        df['Care Home Display'] = df['Care Home ID'].astype(str) + " | " + df['Care Home Name'].astype(str)
+        care_home_map = (
+            df[['Care Home ID', 'Care Home Display']]
+            .drop_duplicates()
+            .set_index('Care Home ID')['Care Home Display']
+            .to_dict()
+        )
         
-            with tab2:
-                st.header("Health Insights (Based on NEWS2)")
-                period2 = st.selectbox("Time Granularity (Health Insights)", ["Daily", "Weekly", "Monthly", "Yearly"], index=2, key="health_period")
-                
-                hi_data = process_health_insights(df, care_home, period2)
-                
-                if hi_data.get('news2_counts') is not None and not hi_data['news2_counts'].empty:
-                    all_scores = sorted(hi_data['news2_counts'].columns)
-                    
-                    # --- 新增：动态生成颜色图例 ---
-                    legend_items = []
-                    for score in all_scores:
-                        colors = get_news2_color(score)
-                        legend_items.append(
-                            f'<span style="background-color: {colors["background"]}; color: {colors["text"]}; padding: 3px 8px; margin: 2px; border-radius: 5px; font-weight: bold; display: inline-block;">'
-                            f'{score}</span>'
-                        )
-                    st.markdown("<b>NEWS2 Score Legend & Filter:</b><br>" + " ".join(legend_items), unsafe_allow_html=True)
+        # 将 selectbox 放在主页面
+        care_home_id = st.selectbox(
+            "Select Care Home",
+            options=sorted(list(care_home_map.keys())), 
+            format_func=lambda x: care_home_map.get(x, x), # 使用 .get() 增加健壮性
+            label_visibility="collapsed" # 隐藏标签，因为我们已经有了subheader
+        )
+        
+        st.markdown("---") # 添加分割线
 
-                    selected_scores = st.multiselect(
-                        "You can hide scores by removing them below:", # 更新了提示语
-                        options=all_scores,
-                        default=all_scores,
-                        key=f"news2_filter_{care_home}"
+        care_home = care_home_id
+        care_home_info = get_care_home_info(df, care_home)
+        beds = care_home_info.get('beds', 10)
+        
+        with st.expander("Care Home Basic Information", expanded=True):
+            st.markdown(f"**Name:** {care_home_map.get(care_home, 'N/A')}")
+            st.markdown(f"**Number of Beds:** {beds}")
+            st.markdown(f"**Number of Observations:** {care_home_info.get('obs_count', 'N/A')}")
+            st.markdown(f"**Data Time Range:** {care_home_info.get('date_range', 'N/A')}")
+        
+        tab1, tab2 = st.tabs(["Usage Analysis", "Health Insights"])
+    
+        with tab1:
+            st.header("Usage Analysis")
+            period = st.selectbox("Time Granularity", ["Daily", "Weekly", "Monthly", "Yearly"], index=2, key="usage_period")
+            usage_df = process_usage_data(df, care_home, beds, period)
+            st.plotly_chart(plot_usage_counts(usage_df, period), use_container_width=True, key="usage_counts")
+            st.plotly_chart(plot_usage_per_bed(usage_df, period), use_container_width=True, key="usage_per_bed")
+            if period == "Monthly":
+                # This import is fine here as it's specific to this block
+                from data_processor_simple import calculate_coverage_percentage
+                coverage_df = calculate_coverage_percentage(df[df['Care Home ID'] == care_home])
+                st.plotly_chart(plot_coverage(coverage_df), use_container_width=True, key="coverage")
+            else:
+                st.info("Coverage % is only displayed in Monthly mode.")
+    
+        with tab2:
+            st.header("Health Insights (Based on NEWS2)")
+            period2 = st.selectbox("Time Granularity (Health Insights)", ["Daily", "Weekly", "Monthly", "Yearly"], index=2, key="health_period")
+            
+            hi_data = process_health_insights(df, care_home, period2)
+            
+            if hi_data.get('news2_counts') is not None and not hi_data['news2_counts'].empty:
+                all_scores = sorted(hi_data['news2_counts'].columns)
+                
+                # --- 新增：动态生成颜色图例 ---
+                legend_items = []
+                for score in all_scores:
+                    colors = get_news2_color(score)
+                    legend_items.append(
+                        f'<span style="background-color: {colors["background"]}; color: {colors["text"]}; padding: 3px 8px; margin: 2px; border-radius: 5px; font-weight: bold; display: inline-block;">'
+                        f'{score}</span>'
                     )
+                st.markdown("<b>NEWS2 Score Legend & Filter:</b><br>" + " ".join(legend_items), unsafe_allow_html=True)
 
-                    if selected_scores:
-                        st.plotly_chart(plot_news2_counts(hi_data, period2, selected_scores=selected_scores), use_container_width=True, key="news2_counts")
-                        st.plotly_chart(plot_news2_barchart(hi_data, period2, selected_scores=selected_scores), use_container_width=True, key="news2_barchart")
-                    else:
-                        st.info("Please select at least one NEWS2 score from the filter to display the charts.")
+                selected_scores = st.multiselect(
+                    "You can hide scores by removing them below:", # 更新了提示语
+                    options=all_scores,
+                    default=all_scores,
+                    key=f"news2_filter_{care_home}"
+                )
+
+                if selected_scores:
+                    st.plotly_chart(plot_news2_counts(hi_data, period2, selected_scores=selected_scores), use_container_width=True, key="news2_counts")
+                    st.plotly_chart(plot_news2_barchart(hi_data, period2, selected_scores=selected_scores), use_container_width=True, key="news2_barchart")
                 else:
-                    st.info("No NEWS2 score data available to display.")
+                    st.info("Please select at least one NEWS2 score from the filter to display the charts.")
+            else:
+                st.info("No NEWS2 score data available to display.")
 
                 # --- 保留其他图表 ---
                 st.plotly_chart(plot_high_risk_prop(hi_data, period2), use_container_width=True, key="high_risk_prop")
@@ -240,8 +249,6 @@ elif step_title == "Care Home Analysis":
                 st.plotly_chart(plot_judgement_accuracy(hi_data, period2), use_container_width=True, key="judgement_accuracy")
                 st.plotly_chart(plot_high_score_params(hi_data, period2), use_container_width=True, key="high_score_params")
 
-        else:
-            st.info("Regional Analysis is not implemented yet. Please select Care Home Level Analysis.")
     else:
         st.warning("Please complete Step 1 first by uploading data and entering analysis.")
 
