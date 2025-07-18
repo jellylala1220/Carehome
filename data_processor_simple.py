@@ -322,7 +322,8 @@ def get_news2_color(score):
     alpha = 0.7
     if score <= 3:
         r, g, b = 0, 200, 0
-        alpha = 0.3 + 0.2 * score
+        # 修正：反转alpha逻辑，让0分为深绿色，3分为浅绿色
+        alpha = 0.9 - 0.2 * score
     elif 4 <= score <= 5:
         r, g, b = 255, 215, 0
         alpha = 0.5 + 0.2 * (score - 4)
