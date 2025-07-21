@@ -22,16 +22,21 @@ from streamlit_option_menu import option_menu
 
 # ----------- 统一美化所有 plotly 折线图 -----------
 def beautify_line_chart(fig):
-    fig.update_traces(
-        selector=dict(mode="lines+markers"),
-        line=dict(width=3)
-    )
-    fig.update_layout(
-        font=dict(size=20, family="Arial", color="black"),
-        legend=dict(font=dict(size=18)),
-        xaxis=dict(tickfont=dict(size=18), titlefont=dict(size=20)),
-        yaxis=dict(tickfont=dict(size=18), titlefont=dict(size=20)),
-    )
+    if not isinstance(fig, go.Figure):
+        return fig
+    try:
+        fig.update_traces(
+            selector=dict(mode="lines+markers"),
+            line=dict(width=3)
+        )
+        fig.update_layout(
+            font=dict(size=20, family="Arial", color="black"),
+            legend=dict(font=dict(size=18)),
+            xaxis=dict(tickfont=dict(size=18), titlefont=dict(size=20)),
+            yaxis=dict(tickfont=dict(size=18), titlefont=dict(size=20)),
+        )
+    except Exception as e:
+        print(f"Beautify error: {e}")
     return fig
 
 st.set_page_config(page_title="Care Home Analysis Dashboard", layout="wide")
