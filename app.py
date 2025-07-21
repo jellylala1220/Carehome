@@ -20,6 +20,20 @@ from io import StringIO
 import numpy as np
 from streamlit_option_menu import option_menu
 
+# ----------- 统一美化所有 plotly 折线图 -----------
+def beautify_line_chart(fig):
+    fig.update_traces(
+        selector=dict(mode="lines+markers"),
+        line=dict(width=3)
+    )
+    fig.update_layout(
+        font=dict(size=20, family="Arial", color="black"),
+        legend=dict(font=dict(size=18)),
+        xaxis=dict(tickfont=dict(size=18), titlefont=dict(size=20)),
+        yaxis=dict(tickfont=dict(size=18), titlefont=dict(size=20)),
+    )
+    return fig
+
 st.set_page_config(page_title="Care Home Analysis Dashboard", layout="wide")
 
 # Initialize session state
@@ -960,16 +974,3 @@ elif step_title == "Correlation Analysis":
                         hovermode='x unified'
                     )
                     st.plotly_chart(beautify_line_chart(fig), use_container_width=True)
-
-def beautify_line_chart(fig):
-    fig.update_traces(
-        selector=dict(mode="lines+markers"),
-        line=dict(width=3)
-    )
-    fig.update_layout(
-        font=dict(size=20, family="Arial", color="black"),
-        legend=dict(font=dict(size=18)),
-        xaxis=dict(tickfont=dict(size=18), titlefont=dict(size=20)),
-        yaxis=dict(tickfont=dict(size=18), titlefont=dict(size=20)),
-    )
-    return fig
