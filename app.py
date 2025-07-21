@@ -36,8 +36,7 @@ if 'batch_prediction_authenticated' not in st.session_state:
 
 # Sidebar navigation - 改用新的 option_menu
 with st.sidebar:
-    st.image("Loughborough LOGO.png", width=120)
-    st.image("These Hands Academy LTD Logo.png", width=120)
+    # 移除 logo 展示，只保留导航栏
     step_title = option_menu(
         menu_title="Navigation",  # 菜单标题
         options=[
@@ -49,7 +48,6 @@ with st.sidebar:
             "Regional Analysis",
             "Correlation Analysis"
         ],
-        # 可选：为每个按钮添加图标
         icons=[
             "cloud-upload", 
             "house", 
@@ -62,6 +60,14 @@ with st.sidebar:
         menu_icon="cast",  # 菜单图标
         default_index=0,  # 默认选中的按钮
     )
+
+# 在主页面顶部展示 logo（只展示一次，且放大）
+st.markdown("""
+<div style='display: flex; align-items: center; justify-content: center; gap: 40px; margin-bottom: 20px;'>
+    <img src='Loughborough LOGO.png' width='220' style='border-radius: 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.08);'/>
+    <img src='These Hands Academy LTD Logo.png' width='220' style='border-radius: 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.08);'/>
+</div>
+""", unsafe_allow_html=True)
 
 # Step 1: Upload Data
 if step_title == "Upload Data":
@@ -954,3 +960,16 @@ elif step_title == "Correlation Analysis":
                         hovermode='x unified'
                     )
                     st.plotly_chart(beautify_line_chart(fig), use_container_width=True)
+
+def beautify_line_chart(fig):
+    fig.update_traces(
+        selector=dict(mode="lines+markers"),
+        line=dict(width=3)
+    )
+    fig.update_layout(
+        font=dict(size=20, family="Arial", color="black"),
+        legend=dict(font=dict(size=18)),
+        xaxis=dict(tickfont=dict(size=18), titlefont=dict(size=20)),
+        yaxis=dict(tickfont=dict(size=18), titlefont=dict(size=20)),
+    )
+    return fig
