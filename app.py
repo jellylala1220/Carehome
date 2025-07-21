@@ -36,6 +36,8 @@ if 'batch_prediction_authenticated' not in st.session_state:
 
 # Sidebar navigation - 改用新的 option_menu
 with st.sidebar:
+    st.image("Loughborough LOGO.png", width=120)
+    st.image("These Hands Academy LTD Logo.png", width=120)
     step_title = option_menu(
         menu_title="Navigation",  # 菜单标题
         options=[
@@ -106,6 +108,12 @@ if step_title == "Upload Data":
                     st.session_state['df'] = df
                     st.session_state['processed_file_name'] = main_data_file.name
                     st.session_state['go_analysis'] = False # 仅为新文件重置分析状态
+                
+                # --- 新增调试信息 ---
+                with st.expander("DEBUG INFO: After Processing & Caching"):
+                    st.success("Data has been processed and saved to session state.")
+                    st.write("Columns in DataFrame:", st.session_state.get('df').columns.tolist())
+
                 st.success("File uploaded and processed successfully!")
             
             except Exception as e:
@@ -165,6 +173,11 @@ elif step_title == "Care Home Analysis":
 
     if st.session_state['df'] is not None and st.session_state['go_analysis']:
         df = st.session_state['df']
+
+        # --- 新增调试信息 ---
+        with st.expander("DEBUG INFO: At Start of Step 2"):
+            st.info("Data retrieved from session state.")
+            st.write("Columns in DataFrame:", df.columns.tolist())
 
         # 移除侧边栏的分析类型选择
         # analysis_mode = st.sidebar.radio("Analysis Level", options=["Care Home Level Analysis", "Regional Analysis"], index=0)
@@ -503,7 +516,7 @@ elif step_title == "Prediction Visualization":
                         showlegend=True,
                         yaxis=dict(range=yaxis_range) # 应用固定的Y轴范围
                     )
-                    st.plotly_chart(fig, use_container_width=True, key=f"plot_{care_home_id}_{score}")
+                    st.plotly_chart(beautify_line_chart(fig), use_container_width=True, key=f"plot_{care_home_id}_{score}")
         elif not upload_pred_file:
             st.info("Awaiting upload of prediction file.")
 
@@ -588,7 +601,7 @@ elif step_title == "Benchmark Grouping":
                 title=f'Distribution of Monthly Usage per Bed {title_suffix}'
             )
             fig_box.update_traces(pointpos=0)
-            st.plotly_chart(fig_box, use_container_width=True)
+            st.plotly_chart(beautify_line_chart(fig_box), use_container_width=True)
 
             # 2. Benchmark Grouping 热力图 (Heatmap) - 同样使用筛选后的数据
             st.subheader(f"Benchmark Grouping Heatmap {title_suffix}")
@@ -633,7 +646,7 @@ elif step_title == "Benchmark Grouping":
                     yaxis_autorange='reversed',
                     height=heatmap_height
                 )
-                st.plotly_chart(fig_heatmap, use_container_width=True)
+                st.plotly_chart(beautify_line_chart(fig_heatmap), use_container_width=True)
 
             # 3. 新增：地理分布图
             st.subheader("Geospatial Distribution of High Usage Frequency")
@@ -695,7 +708,7 @@ elif step_title == "Benchmark Grouping":
                     margin={"r":0,"t":0,"l":0,"b":0},
                     height=1000 # 增加地图高度
                 )
-                st.plotly_chart(fig_map, use_container_width=True)
+                st.plotly_chart(beautify_line_chart(fig_map), use_container_width=True)
 
             # 4. 明细表 - 使用地理数据
             st.subheader("Detailed High Usage Frequency Ranking")
@@ -761,7 +774,7 @@ elif step_title == "Regional Analysis":
                     points='all'
                 )
                 fig_box.update_traces(pointpos=0)
-                st.plotly_chart(fig_box, use_container_width=True)
+                st.plotly_chart(beautify_line_chart(fig_box), use_container_width=True)
 
                 st.markdown("---")
 
@@ -791,7 +804,7 @@ elif step_title == "Regional Analysis":
                         category_orders={"Group": ["Low", "Medium", "High"]}
                     )
                     fig_bar.update_yaxes(tickformat=".0%")
-                    st.plotly_chart(fig_bar, use_container_width=True)
+                    st.plotly_chart(beautify_line_chart(fig_bar), use_container_width=True)
                 
                 st.markdown("---")
 
@@ -859,7 +872,7 @@ elif step_title == "Correlation Analysis":
                         trendline="ols", # 添加普通最小二乘趋势线
                         trendline_color_override="red"
                     )
-                    st.plotly_chart(fig_scatter, use_container_width=True)
+                    st.plotly_chart(beautify_line_chart(fig_scatter), use_container_width=True)
                 else:
                     st.info("Could not calculate overall correlation due to insufficient data or lack of variance.")
                 
@@ -940,4 +953,4 @@ elif step_title == "Correlation Analysis":
                         legend=dict(x=0.01, y=0.99, yanchor='top', xanchor='left', borderwidth=1),
                         hovermode='x unified'
                     )
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.plotly_chart(beautify_line_chart(fig), use_container_width=True)
