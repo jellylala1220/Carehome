@@ -160,6 +160,7 @@ if step_title == "Upload Data":
     # --- 改进的显示逻辑 ---
     # 只要缓存中有数据，就显示概览
     if st.session_state.get('df') is not None:
+        df = st.session_state['df']
         # 上传并处理数据后
         df['Care Home ID'] = df['Care Home ID'].astype(str).str.strip()
         df = df[df['Care Home ID'].notnull() & (df['Care Home ID'] != '')]
