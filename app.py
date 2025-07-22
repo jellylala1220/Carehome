@@ -30,10 +30,10 @@ def beautify_line_chart(fig):
             line=dict(width=3)
         )
         fig.update_layout(
-            font=dict(size=20, family="Arial", color="black"),
-            legend=dict(font=dict(size=18)),
-            xaxis=dict(tickfont=dict(size=18), titlefont=dict(size=20)),
-            yaxis=dict(tickfont=dict(size=18), titlefont=dict(size=20)),
+            font=dict(size=22, family="Arial", color="black"),
+            legend=dict(font=dict(size=20)),
+            xaxis=dict(tickfont=dict(size=22), titlefont=dict(size=24)),
+            yaxis=dict(tickfont=dict(size=20), titlefont=dict(size=24)),
         )
     except Exception as e:
         print(f"Beautify error: {e}")
@@ -82,10 +82,10 @@ with st.sidebar:
 
 # 在主页面顶部展示 logo（只展示一次，且放大）
 st.markdown("<div style='height: 30px'></div>", unsafe_allow_html=True)  # 顶部留白
-col1, col2, _ = st.columns([1, 1, 2])
+col0, col1, col2, col3, col4 = st.columns([1, 2, 2, 2, 1])
 with col1:
     st.image("loughborough_logo.png", width=220)
-with col2:
+with col3:
     st.image("these_hands_academy_logo.png", width=220)
 
 # Step 1: Upload Data
@@ -979,3 +979,17 @@ elif step_title == "Correlation Analysis":
                         hovermode='x unified'
                     )
                     st.plotly_chart(beautify_line_chart(fig), use_container_width=True)
+
+st.markdown(
+    """
+    <style>
+    .stDataFrame tbody tr td {
+        font-size: 20px !important;
+    }
+    .stDataFrame thead tr th {
+        font-size: 20px !important;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True
+)
