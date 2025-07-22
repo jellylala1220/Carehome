@@ -32,8 +32,10 @@ def beautify_line_chart(fig):
         fig.update_layout(
             font=dict(size=22, family="Arial", color="black"),
             legend=dict(font=dict(size=20)),
-            xaxis=dict(tickfont=dict(size=22), titlefont=dict(size=24)),
-            yaxis=dict(tickfont=dict(size=20), titlefont=dict(size=24)),
+            xaxis=dict(tickfont=dict(size=22)),
+            yaxis=dict(tickfont=dict(size=20)),
+            xaxis_title_font=dict(size=24),
+            yaxis_title_font=dict(size=24),
         )
     except Exception as e:
         print(f"Beautify error: {e}")
@@ -55,7 +57,6 @@ if 'batch_prediction_authenticated' not in st.session_state:
 
 # Sidebar navigation - 改用新的 option_menu
 with st.sidebar:
-    # 移除 logo 展示，只保留导航栏
     step_title = option_menu(
         menu_title="Navigation",  # 菜单标题
         options=[
@@ -79,10 +80,15 @@ with st.sidebar:
         menu_icon="cast",  # 菜单图标
         default_index=0,  # 默认选中的按钮
     )
+    st.markdown("""
+    <div style='margin-top: 40px; font-size: 13px; color: #888; text-align: center;'>
+    © 2025 LEI LYU, Supervisor: [导师名字], Loughborough University. All rights reserved.
+    </div>
+    """, unsafe_allow_html=True)
 
-# 在主页面顶部展示 logo（只展示一次，且放大）
+# 在主页面顶部展示 logo（只展示一次，且放大，且更靠近）
 st.markdown("<div style='height: 30px'></div>", unsafe_allow_html=True)  # 顶部留白
-col0, col1, col2, col3, col4 = st.columns([1, 2, 2, 2, 1])
+col0, col1, col2, col3, col4 = st.columns([1, 2, 1, 2, 1])
 with col1:
     st.image("loughborough_logo.png", width=220)
 with col3:
@@ -199,10 +205,10 @@ elif step_title == "Care Home Analysis":
     if st.session_state['df'] is not None and st.session_state['go_analysis']:
         df = st.session_state['df']
 
-        # --- 新增调试信息 ---
-        with st.expander("DEBUG INFO: At Start of Step 2"):
-            st.info("Data retrieved from session state.")
-            st.write("Columns in DataFrame:", df.columns.tolist())
+        # --- 移除 DEBUG INFO expander ---
+        # with st.expander("DEBUG INFO: At Start of Step 2"):
+        #     st.info("Data retrieved from session state.")
+        #     st.write("Columns in DataFrame:", df.columns.tolist())
 
         # 移除侧边栏的分析类型选择
         # analysis_mode = st.sidebar.radio("Analysis Level", options=["Care Home Level Analysis", "Regional Analysis"], index=0)
