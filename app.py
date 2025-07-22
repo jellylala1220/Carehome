@@ -86,7 +86,7 @@ with st.sidebar:
     """, unsafe_allow_html=True)
     st.markdown("""
     <div style='margin-top: 40px; font-size: 13px; color: #888; text-align: center;'>
-    © 2025 LEI LYU, Supervisor: Prof. Diwei Zhoue, Loughborough University. All rights reserved.
+    © 2025 LEI LYU, Supervisor: Prof. Diwei Zhou, Loughborough University. All rights reserved.
     </div>
     """, unsafe_allow_html=True)
 
@@ -160,9 +160,10 @@ if step_title == "Upload Data":
     # --- 改进的显示逻辑 ---
     # 只要缓存中有数据，就显示概览
     if st.session_state.get('df') is not None:
-        df = st.session_state.df
-        # Data overview
-        st.subheader("Data Overview")
+        # 上传并处理数据后
+        df['Care Home ID'] = df['Care Home ID'].astype(str).str.strip()
+        df = df[df['Care Home ID'].notnull() & (df['Care Home ID'] != '')]
+
         carehome_counts = df['Care Home ID'].value_counts()
         total_count = carehome_counts.sum()
         id_to_name = df.drop_duplicates('Care Home ID').set_index('Care Home ID')['Care Home Name'].astype(str).to_dict()
@@ -172,10 +173,16 @@ if step_title == "Upload Data":
         table['Percentage'] = (table['Count'] / total_count) * 100
         table = table[['Care Home ID', 'Care Home Name', 'Count', 'Percentage']]
         table = table.sort_values('Count', ascending=False).reset_index(drop=True)
-        valid_carehomes = table['Care Home ID'].tolist()
+        valid_carehomes = set(table['Care Home ID'])
         all_carehomes = set(df['Care Home ID'].unique())
-        invalid_carehomes = all_carehomes - set(valid_carehomes)
+        invalid_carehomes = all_carehomes - valid_carehomes
         valid_count_sum = table['Count'].sum()
+
+        # 存入 session_state，后续页面直接读取
+        st.session_state['carehome_table'] = table
+        st.session_state['valid_carehomes'] = valid_carehomes
+        st.session_state['invalid_carehomes'] = invalid_carehomes
+        st.session_state['valid_count_sum'] = valid_count_sum
 
         col1, col2, col3 = st.columns(3)
         col1.metric("Number of Valid Care Homes", len(valid_carehomes))
@@ -868,9 +875,14 @@ elif step_title == "Correlation Analysis":
         st.warning("Please upload data in Step 1 to begin this analysis.")
     else:
         df = st.session_state['df']
+        # 自动标准化列名，兼容 NEWS2 score/NEWS2 Score
+        df.columns = [str(col).strip() for col in df.columns]
+        if 'NEWS2 score' in df.columns and 'NEWS2 Score' not in df.columns:
+            df.rename(columns={'NEWS2 score': 'NEWS2 Score'}, inplace=True)
 
         if 'NEWS2 score' not in df.columns or 'No of Beds' not in df.columns:
             st.error("Source data must contain 'NEWS2 score' and 'No of Beds' columns for this analysis.")
+            st.info(f"Current columns: {df.columns.tolist()}")
         else:
             # --- 将 Correlation Settings 移到主页面 ---
             st.subheader("Correlation Settings")
