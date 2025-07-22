@@ -160,14 +160,13 @@ if step_title == "Upload Data":
     # --- 改进的显示逻辑 ---
     # 只要缓存中有数据，就显示概览
     if st.session_state.get('df') is not None:
-        df = st.session_state['df']  # 只读，不再写回 session_state['df']
-        # 上传并处理数据后（只做统计，不写回 session_state['df']）
-        df['Care Home ID'] = df['Care Home ID'].astype(str).str.strip()
-        df = df[df['Care Home ID'].notnull() & (df['Care Home ID'] != '')]
+        df_stat = st.session_state['df'].copy()
+        df_stat['Care Home ID'] = df_stat['Care Home ID'].astype(str).str.strip()
+        df_stat = df_stat[df_stat['Care Home ID'].notnull() & (df_stat['Care Home ID'] != '')]
 
-        carehome_counts = df['Care Home ID'].value_counts()
+        carehome_counts = df_stat['Care Home ID'].value_counts()
         total_count = carehome_counts.sum()
-        id_to_name = df.drop_duplicates('Care Home ID').set_index('Care Home ID')['Care Home Name'].astype(str).to_dict()
+        id_to_name = df_stat.drop_duplicates('Care Home ID').set_index('Care Home ID')['Care Home Name'].astype(str).to_dict()
         table = carehome_counts.reset_index()
         table.columns = ['Care Home ID', 'Count']
         table['Care Home Name'] = table['Care Home ID'].map(id_to_name)
@@ -175,7 +174,7 @@ if step_title == "Upload Data":
         table = table[['Care Home ID', 'Care Home Name', 'Count', 'Percentage']]
         table = table.sort_values('Count', ascending=False).reset_index(drop=True)
         valid_carehomes = set(table['Care Home ID'])
-        all_carehomes = set(df['Care Home ID'].unique())
+        all_carehomes = set(df_stat['Care Home ID'].unique())
         invalid_carehomes = all_carehomes - valid_carehomes
         valid_count_sum = table['Count'].sum()
 
@@ -875,18 +874,19 @@ elif step_title == "Correlation Analysis":
     if st.session_state['df'] is None:
         st.warning("Please upload data in Step 1 to begin this analysis.")
     else:
-        df = st.session_state['df']
-        # 自动标准化列名
+        df = st.session_state['df'].copy()
         df.columns = [str(col).strip() for col in df.columns]
-        # 兼容 NEWS2 score/NEWS2 Score
         if 'NEWS2 score' in df.columns and 'NEWS2 Score' not in df.columns:
             df.rename(columns={'NEWS2 score': 'NEWS2 Score'}, inplace=True)
 
-        # 检查 No of Beds 和 NEWS2 Score 是否存在
         if 'No of Beds' not in df.columns or 'NEWS2 Score' not in df.columns:
-            st.error("Source data must contain 'NEWS2 Score'（或 'NEWS2 score'）和 'No of Beds' columns for this analysis.")
+            st.error("Source data must contain 'NEWS2 Score' 和 'No of Beds' columns for this analysis.")
             st.info(f"Current columns: {df.columns.tolist()}")
         else:
+            df['Date/Time'] = pd.to_datetime(df['Date/Time'], errors='coerce')
+            df = df[df['Date/Time'].notnull()]
+            df['Month'] = df['Date/Time'].dt.strftime('%Y-%m')
+
             # --- 将 Correlation Settings 移到主页面 ---
             st.subheader("Correlation Settings")
             min_months_for_corr = st.number_input(
