@@ -139,7 +139,7 @@ if step_title == "Upload Data":
                     if 'Care Home Name' in df.columns:
                         df['Care Home Name'] = df['Care Home Name'].astype(str)
 
-                    # 更新 session state
+                    # 只在这里写入 session_state['df']
                     st.session_state['df'] = df
                     st.session_state['processed_file_name'] = main_data_file.name
                     st.session_state['go_analysis'] = False # 仅为新文件重置分析状态
@@ -160,8 +160,8 @@ if step_title == "Upload Data":
     # --- 改进的显示逻辑 ---
     # 只要缓存中有数据，就显示概览
     if st.session_state.get('df') is not None:
-        df = st.session_state['df']
-        # 上传并处理数据后
+        df = st.session_state['df']  # 只读，不再写回 session_state['df']
+        # 上传并处理数据后（只做统计，不写回 session_state['df']）
         df['Care Home ID'] = df['Care Home ID'].astype(str).str.strip()
         df = df[df['Care Home ID'].notnull() & (df['Care Home ID'] != '')]
 
