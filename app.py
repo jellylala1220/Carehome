@@ -872,9 +872,9 @@ elif step_title == "Correlation Analysis":
         if 'NEWS2 score' not in df.columns or 'No of Beds' not in df.columns:
             st.error("Source data must contain 'NEWS2 score' and 'No of Beds' columns for this analysis.")
         else:
-            # --- 新增：允许用户设置最小月份数 ---
-            st.sidebar.subheader("Correlation Settings")
-            min_months_for_corr = st.sidebar.number_input(
+            # --- 将 Correlation Settings 移到主页面 ---
+            st.subheader("Correlation Settings")
+            min_months_for_corr = st.number_input(
                 "Minimum months of data required per care home",
                 min_value=2,
                 max_value=24,
