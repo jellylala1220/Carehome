@@ -876,13 +876,15 @@ elif step_title == "Correlation Analysis":
         st.warning("Please upload data in Step 1 to begin this analysis.")
     else:
         df = st.session_state['df']
-        # 自动标准化列名，兼容 NEWS2 score/NEWS2 Score
+        # 自动标准化列名
         df.columns = [str(col).strip() for col in df.columns]
+        # 兼容 NEWS2 score/NEWS2 Score
         if 'NEWS2 score' in df.columns and 'NEWS2 Score' not in df.columns:
             df.rename(columns={'NEWS2 score': 'NEWS2 Score'}, inplace=True)
 
-        if 'NEWS2 score' not in df.columns or 'No of Beds' not in df.columns:
-            st.error("Source data must contain 'NEWS2 score' and 'No of Beds' columns for this analysis.")
+        # 检查 No of Beds 和 NEWS2 Score 是否存在
+        if 'No of Beds' not in df.columns or 'NEWS2 Score' not in df.columns:
+            st.error("Source data must contain 'NEWS2 Score'（或 'NEWS2 score'）和 'No of Beds' columns for this analysis.")
             st.info(f"Current columns: {df.columns.tolist()}")
         else:
             # --- 将 Correlation Settings 移到主页面 ---
