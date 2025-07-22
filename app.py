@@ -81,12 +81,12 @@ with st.sidebar:
     )
 
 # 在主页面顶部展示 logo（只展示一次，且放大）
-st.markdown("""
-<div style='display: flex; align-items: center; justify-content: center; gap: 40px; margin-bottom: 20px;'>
-    <img src='loughborough_logo.png' width='220' style='border-radius: 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.08);'/>
-    <img src='these_hands_academy_logo.png' width='220' style='border-radius: 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.08);'/>
-</div>
-""", unsafe_allow_html=True)
+st.markdown("<div style='height: 30px'></div>", unsafe_allow_html=True)  # 顶部留白
+col1, col2, _ = st.columns([1, 1, 2])
+with col1:
+    st.image("loughborough_logo.png", width=220)
+with col2:
+    st.image("these_hands_academy_logo.png", width=220)
 
 # Step 1: Upload Data
 if step_title == "Upload Data":
