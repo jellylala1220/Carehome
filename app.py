@@ -86,7 +86,7 @@ with st.sidebar:
     """, unsafe_allow_html=True)
     st.markdown("""
     <div style='margin-top: 40px; font-size: 13px; color: #888; text-align: center;'>
-    © 2025 LEI LYU, Supervisor: Prof. Diwei Zhou, Loughborough University. All rights reserved.
+    © 2025 LEI LYU, Supervisor: Prof. Diwei Zhoue, Loughborough University. All rights reserved.
     </div>
     """, unsafe_allow_html=True)
 
@@ -139,7 +139,7 @@ if step_title == "Upload Data":
                     if 'Care Home Name' in df.columns:
                         df['Care Home Name'] = df['Care Home Name'].astype(str)
 
-                    # 只在这里写入 session_state['df']
+                    # 更新 session state
                     st.session_state['df'] = df
                     st.session_state['processed_file_name'] = main_data_file.name
                     st.session_state['go_analysis'] = False # 仅为新文件重置分析状态
@@ -160,29 +160,22 @@ if step_title == "Upload Data":
     # --- 改进的显示逻辑 ---
     # 只要缓存中有数据，就显示概览
     if st.session_state.get('df') is not None:
-        df_stat = st.session_state['df'].copy()
-        df_stat['Care Home ID'] = df_stat['Care Home ID'].astype(str).str.strip()
-        df_stat = df_stat[df_stat['Care Home ID'].notnull() & (df_stat['Care Home ID'] != '')]
-
-        carehome_counts = df_stat['Care Home ID'].value_counts()
+        df = st.session_state.df
+        # Data overview
+        st.subheader("Data Overview")
+        carehome_counts = df['Care Home ID'].value_counts()
         total_count = carehome_counts.sum()
-        id_to_name = df_stat.drop_duplicates('Care Home ID').set_index('Care Home ID')['Care Home Name'].astype(str).to_dict()
+        id_to_name = df.drop_duplicates('Care Home ID').set_index('Care Home ID')['Care Home Name'].astype(str).to_dict()
         table = carehome_counts.reset_index()
         table.columns = ['Care Home ID', 'Count']
         table['Care Home Name'] = table['Care Home ID'].map(id_to_name)
         table['Percentage'] = (table['Count'] / total_count) * 100
         table = table[['Care Home ID', 'Care Home Name', 'Count', 'Percentage']]
         table = table.sort_values('Count', ascending=False).reset_index(drop=True)
-        valid_carehomes = set(table['Care Home ID'])
-        all_carehomes = set(df_stat['Care Home ID'].unique())
-        invalid_carehomes = all_carehomes - valid_carehomes
+        valid_carehomes = table['Care Home ID'].tolist()
+        all_carehomes = set(df['Care Home ID'].unique())
+        invalid_carehomes = all_carehomes - set(valid_carehomes)
         valid_count_sum = table['Count'].sum()
-
-        # 存入 session_state，后续页面直接读取
-        st.session_state['carehome_table'] = table
-        st.session_state['valid_carehomes'] = valid_carehomes
-        st.session_state['invalid_carehomes'] = invalid_carehomes
-        st.session_state['valid_count_sum'] = valid_count_sum
 
         col1, col2, col3 = st.columns(3)
         col1.metric("Number of Valid Care Homes", len(valid_carehomes))
@@ -200,9 +193,14 @@ if step_title == "Upload Data":
             st.rerun()
 
     # 仅当既没有上传文件，缓存也为空时，才显示警告
-    elif main_data_file is None:
+    elif main_data_file is None and st.session_state.get('df') is None:
         st.warning("Please upload the main data file to begin analysis.")
         # 在这里确保清理状态，以防用户明确删除了文件
+        # st.session_state['df'] = None
+        # st.session_state['processed_file_name'] = None
+        # st.session_state['go_analysis'] = False
+    # 增加一个清除数据按钮，用户主动点击才清空
+    if st.button("Clear Data"):
         st.session_state['df'] = None
         st.session_state['processed_file_name'] = None
         st.session_state['go_analysis'] = False
@@ -720,7 +718,7 @@ elif step_title == "Benchmark Grouping":
                 geospatial_df['lon_jittered'] = geospatial_df['Longitude'] + np.random.uniform(-jitter_amount, jitter_amount, size=len(geospatial_df))
 
                 # 创建地图
-                fig_map = px.scatter_mapbox(
+                fig_map = px.scatter_map(
                     geospatial_df.dropna(subset=['Latitude', 'Longitude']), # 确保没有NaN的经纬度
                     lat="lat_jittered", # 使用抖动后的纬度
                     lon="lon_jittered", # 使用抖动后的经度
@@ -728,7 +726,7 @@ elif step_title == "Benchmark Grouping":
                     size="size",  # 使用新的 size 列
                     color_discrete_map=color_map,
                     category_orders={"pi_group": ["Low", "Medium", "High"]},
-                    mapbox_style="open-street-map",
+                    map_style="open-street-map",
                     zoom=5,
                     center={"lat": 54.5, "lon": -2.0}, # 大致的英国中心
                     hover_name="Care Home Name",
@@ -874,22 +872,14 @@ elif step_title == "Correlation Analysis":
     if st.session_state['df'] is None:
         st.warning("Please upload data in Step 1 to begin this analysis.")
     else:
-        df = st.session_state['df'].copy()
-        df.columns = [str(col).strip() for col in df.columns]
-        if 'NEWS2 score' in df.columns and 'NEWS2 Score' not in df.columns:
-            df.rename(columns={'NEWS2 score': 'NEWS2 Score'}, inplace=True)
+        df = st.session_state['df']
 
-        if 'No of Beds' not in df.columns or 'NEWS2 Score' not in df.columns:
-            st.error("Source data must contain 'NEWS2 Score' 和 'No of Beds' columns for this analysis.")
-            st.info(f"Current columns: {df.columns.tolist()}")
+        if 'NEWS2 score' not in df.columns or 'No of Beds' not in df.columns:
+            st.error("Source data must contain 'NEWS2 score' and 'No of Beds' columns for this analysis.")
         else:
-            df['Date/Time'] = pd.to_datetime(df['Date/Time'], errors='coerce')
-            df = df[df['Date/Time'].notnull()]
-            df['Month'] = df['Date/Time'].dt.strftime('%Y-%m')
-
-            # --- 将 Correlation Settings 移到主页面 ---
-            st.subheader("Correlation Settings")
-            min_months_for_corr = st.number_input(
+            # --- 新增：允许用户设置最小月份数 ---
+            st.sidebar.subheader("Correlation Settings")
+            min_months_for_corr = st.sidebar.number_input(
                 "Minimum months of data required per care home",
                 min_value=2,
                 max_value=24,
