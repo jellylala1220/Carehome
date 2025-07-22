@@ -80,9 +80,13 @@ with st.sidebar:
         menu_icon="cast",  # 菜单图标
         default_index=0,  # 默认选中的按钮
     )
+    # 保证 copy right 在侧边栏最下方
+    st.markdown("""
+    <div style='flex:1'></div>
+    """, unsafe_allow_html=True)
     st.markdown("""
     <div style='margin-top: 40px; font-size: 13px; color: #888; text-align: center;'>
-    © 2025 LEI LYU, Supervisor: [导师名字], Loughborough University. All rights reserved.
+    © 2025 LEI LYU, Supervisor: Prof. Diwei Zhoue, Loughborough University. All rights reserved.
     </div>
     """, unsafe_allow_html=True)
 
@@ -140,10 +144,10 @@ if step_title == "Upload Data":
                     st.session_state['processed_file_name'] = main_data_file.name
                     st.session_state['go_analysis'] = False # 仅为新文件重置分析状态
                 
-                # --- 新增调试信息 ---
-                with st.expander("DEBUG INFO: After Processing & Caching"):
-                    st.success("Data has been processed and saved to session state.")
-                    st.write("Columns in DataFrame:", st.session_state.get('df').columns.tolist())
+                # --- 移除 Step 1 DEBUG INFO ---
+                # with st.expander("DEBUG INFO: After Processing & Caching"):
+                #     st.success("Data has been processed and saved to session state.")
+                #     st.write("Columns in DataFrame:", st.session_state.get('df').columns.tolist())
 
                 st.success("File uploaded and processed successfully!")
             
