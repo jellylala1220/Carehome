@@ -104,7 +104,7 @@ if step_title == "Upload Data":
     st.header("Step 1: Upload Data")
 
     main_data_file = st.file_uploader("Upload Observation Data (Excel)", type=["xlsx"])
-
+#  --- 改进缓存逻辑 ---
     # --- 改进缓存逻辑 ---
     # 只有当上传了新文件时，才执行处理逻辑
     if main_data_file is not None:
@@ -112,50 +112,50 @@ if step_title == "Upload Data":
         if st.session_state.get('processed_file_name') != main_data_file.name:
             try:
                 with st.spinner("Processing new file..."):
-    df = pd.read_excel(main_data_file)
+                df = pd.read_excel(main_data_file)
                     
                     # Clean column names
-                    df.columns = [str(col).strip() for col in df.columns]
+                df.columns = [str(col).strip() for col in df.columns]
 
                     # Geocoding logic
-                    needs_geocoding = ('Latitude' not in df.columns or 'Longitude' not in df.columns or
+                needs_geocoding = ('Latitude' not in df.columns or 'Longitude' not in df.columns or
                                        df['Latitude'].isnull().any() or df['Longitude'].isnull().any())
                     
-                    if needs_geocoding and 'Post Code' in df.columns:
-                        lat_nan_before = df['Latitude'].isnull().sum() if 'Latitude' in df.columns else len(df)
+                if needs_geocoding and 'Post Code' in df.columns:
+                    at_nan_before = df['Latitude'].isnull().sum() if 'Latitude' in df.columns else len(df)
                         
-                        df = geocode_uk_postcodes(df, 'Post Code')
+                    df = geocode_uk_postcodes(df, 'Post Code')
                         
-                        if 'Latitude' in df.columns:
+                    if 'Latitude' in df.columns:
                             lat_nan_after = df['Latitude'].isnull().sum()
                             generated_count = lat_nan_before - lat_nan_after
-                            if generated_count > 0:
+                        if generated_count > 0:
                                 st.success(f"Successfully generated coordinates for {generated_count} entries.")
-                            if lat_nan_after > 0:
+                        if lat_nan_after > 0:
                                 st.warning(f"Could not find coordinates for {lat_nan_after} entries. These will be excluded from the map.")
-                        else:
+                    else:
                              st.error("Failed to create 'Latitude'/'Longitude' columns during geocoding.")
 
                     if 'Care Home Name' in df.columns:
                         df['Care Home Name'] = df['Care Home Name'].astype(str)
 
                     # 更新 session state
-    st.session_state['df'] = df
-                    st.session_state['processed_file_name'] = main_data_file.name
-                    st.session_state['go_analysis'] = False # 仅为新文件重置分析状态
+                st.session_state['df'] = df
+                st.session_state['processed_file_name'] = main_data_file.name
+                st.session_state['go_analysis'] = False # 仅为新文件重置分析状态
                 
                 # --- 移除 Step 1 DEBUG INFO ---
                 # with st.expander("DEBUG INFO: After Processing & Caching"):
                 #     st.success("Data has been processed and saved to session state.")
                 #     st.write("Columns in DataFrame:", st.session_state.get('df').columns.tolist())
 
-                st.success("File uploaded and processed successfully!")
+            st.success("File uploaded and processed successfully!")
             
-            except Exception as e:
-                st.error(f"Error processing file: {e}")
-                # 出错时清空状态
-                st.session_state['df'] = None
-                st.session_state['processed_file_name'] = None
+        except Exception as e:
+            st.error(f"Error processing file: {e}")
+            # 出错时清空状态
+            st.session_state['df'] = None
+            st.session_state['processed_file_name'] = None
 
     # --- 改进的显示逻辑 ---
     # 只要缓存中有数据，就显示概览
