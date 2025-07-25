@@ -98,64 +98,57 @@ with col1:
 with col3:
     st.image("these_hands_academy_logo.png", width=220)
 
+
 # Step 1: Upload Data
 if step_title == "Upload Data":
     st.title("Care Home Analysis Dashboard")
     st.header("Step 1: Upload Data")
 
     main_data_file = st.file_uploader("Upload Observation Data (Excel)", type=["xlsx"])
-#  --- 改进缓存逻辑 ---
     # --- 改进缓存逻辑 ---
-    # 只有当上传了新文件时，才执行处理逻辑
     if main_data_file is not None:
         # 检查是否是与缓存中不同的新文件
         if st.session_state.get('processed_file_name') != main_data_file.name:
             try:
                 with st.spinner("Processing new file..."):
-                df = pd.read_excel(main_data_file)
-                    
+                    df = pd.read_excel(main_data_file)
                     # Clean column names
-                df.columns = [str(col).strip() for col in df.columns]
+                    df.columns = [str(col).strip() for col in df.columns]
 
                     # Geocoding logic
-                needs_geocoding = ('Latitude' not in df.columns or 'Longitude' not in df.columns or
+                    needs_geocoding = ('Latitude' not in df.columns or 'Longitude' not in df.columns or
                                        df['Latitude'].isnull().any() or df['Longitude'].isnull().any())
                     
-                if needs_geocoding and 'Post Code' in df.columns:
-                    at_nan_before = df['Latitude'].isnull().sum() if 'Latitude' in df.columns else len(df)
+                    if needs_geocoding and 'Post Code' in df.columns:
+                        lat_nan_before = df['Latitude'].isnull().sum() if 'Latitude' in df.columns else len(df)
                         
-                    df = geocode_uk_postcodes(df, 'Post Code')
+                        df = geocode_uk_postcodes(df, 'Post Code')
                         
-                    if 'Latitude' in df.columns:
+                        if 'Latitude' in df.columns:
                             lat_nan_after = df['Latitude'].isnull().sum()
                             generated_count = lat_nan_before - lat_nan_after
-                        if generated_count > 0:
+                            if generated_count > 0:
                                 st.success(f"Successfully generated coordinates for {generated_count} entries.")
-                        if lat_nan_after > 0:
+                            if lat_nan_after > 0:
                                 st.warning(f"Could not find coordinates for {lat_nan_after} entries. These will be excluded from the map.")
-                    else:
-                             st.error("Failed to create 'Latitude'/'Longitude' columns during geocoding.")
+                        else:
+                            st.error("Failed to create 'Latitude'/'Longitude' columns during geocoding.")
 
                     if 'Care Home Name' in df.columns:
                         df['Care Home Name'] = df['Care Home Name'].astype(str)
 
                     # 更新 session state
-                st.session_state['df'] = df
-                st.session_state['processed_file_name'] = main_data_file.name
-                st.session_state['go_analysis'] = False # 仅为新文件重置分析状态
+                    st.session_state['df'] = df
+                    st.session_state['processed_file_name'] = main_data_file.name
+                    st.session_state['go_analysis'] = False # 仅为新文件重置分析状态
                 
-                # --- 移除 Step 1 DEBUG INFO ---
-                # with st.expander("DEBUG INFO: After Processing & Caching"):
-                #     st.success("Data has been processed and saved to session state.")
-                #     st.write("Columns in DataFrame:", st.session_state.get('df').columns.tolist())
-
-            st.success("File uploaded and processed successfully!")
+                st.success("File uploaded and processed successfully!")
             
-        except Exception as e:
-            st.error(f"Error processing file: {e}")
-            # 出错时清空状态
-            st.session_state['df'] = None
-            st.session_state['processed_file_name'] = None
+            except Exception as e:
+                st.error(f"Error processing file: {e}")
+                # 出错时清空状态
+                st.session_state['df'] = None
+                st.session_state['processed_file_name'] = None
 
     # --- 改进的显示逻辑 ---
     # 只要缓存中有数据，就显示概览
@@ -163,42 +156,38 @@ if step_title == "Upload Data":
         df = st.session_state.df
         # Data overview
         st.subheader("Data Overview")
-    carehome_counts = df['Care Home ID'].value_counts()
-    total_count = carehome_counts.sum()
+        carehome_counts = df['Care Home ID'].value_counts()
+        total_count = carehome_counts.sum()
         id_to_name = df.drop_duplicates('Care Home ID').set_index('Care Home ID')['Care Home Name'].astype(str).to_dict()
-    table = carehome_counts.reset_index()
-    table.columns = ['Care Home ID', 'Count']
-    table['Care Home Name'] = table['Care Home ID'].map(id_to_name)
-    table['Percentage'] = (table['Count'] / total_count) * 100
-    table = table[['Care Home ID', 'Care Home Name', 'Count', 'Percentage']]
-    table = table.sort_values('Count', ascending=False).reset_index(drop=True)
-    valid_carehomes = table['Care Home ID'].tolist()
-    all_carehomes = set(df['Care Home ID'].unique())
-    invalid_carehomes = all_carehomes - set(valid_carehomes)
-    valid_count_sum = table['Count'].sum()
+        table = carehome_counts.reset_index()
+        table.columns = ['Care Home ID', 'Count']
+        table['Care Home Name'] = table['Care Home ID'].map(id_to_name)
+        table['Percentage'] = (table['Count'] / total_count) * 100
+        table = table[['Care Home ID', 'Care Home Name', 'Count', 'Percentage']]
+        table = table.sort_values('Count', ascending=False).reset_index(drop=True)
+        valid_carehomes = table['Care Home ID'].tolist()
+        all_carehomes = set(df['Care Home ID'].unique())
+        invalid_carehomes = all_carehomes - set(valid_carehomes)
+        valid_count_sum = table['Count'].sum()
 
-    col1, col2, col3 = st.columns(3)
-    col1.metric("Number of Valid Care Homes", len(valid_carehomes))
-    col2.metric("Number of Invalid Care Homes", len(invalid_carehomes))
-    col3.metric("Total Valid Observations", valid_count_sum)
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Number of Valid Care Homes", len(valid_carehomes))
+        col2.metric("Number of Invalid Care Homes", len(invalid_carehomes))
+        col3.metric("Total Valid Observations", valid_count_sum)
 
-    st.subheader("Care Home Observation Counts (Descending)")
-    st.dataframe(
-        table.style.format({'Percentage': '{:.1f}%'}),
-        use_container_width=True
-    )
+        st.subheader("Care Home Observation Counts (Descending)")
+        st.dataframe(
+            table.style.format({'Percentage': '{:.1f}%'}),
+            use_container_width=True
+        )
 
-    if st.button("Enter Analysis"):
-        st.session_state['go_analysis'] = True
-        st.rerun()
+        if st.button("Enter Analysis"):
+            st.session_state['go_analysis'] = True
+            st.rerun()
 
     # 仅当既没有上传文件，缓存也为空时，才显示警告
     elif main_data_file is None and st.session_state.get('df') is None:
         st.warning("Please upload the main data file to begin analysis.")
-        # 在这里确保清理状态，以防用户明确删除了文件
-        # st.session_state['df'] = None
-        # st.session_state['processed_file_name'] = None
-        # st.session_state['go_analysis'] = False
     # 增加一个清除数据按钮，用户主动点击才清空
     if st.button("Clear Data"):
         st.session_state['df'] = None
