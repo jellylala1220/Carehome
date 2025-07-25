@@ -181,13 +181,9 @@ def process_health_insights(df, care_home_id, period):
         'param_trigger': param_trigger_df
     }
 
-def predict_next_month_bayesian(df_carehome, window_length=2, sigma=0.5):
+def predict_next_month_bayesian(df_carehome, window_length=2, sigma=0.5, mode='next'):
     """
-    使用PyMC进行贝叶斯时间序列预测.
-    :param df_carehome: 单个 care home 的 DataFrame.
-    :param window_length: 用于计算先验的移动平均窗口.
-    :param sigma: 先验的离散程度.
-    :return: 包含预测结果的 DataFrame 和目标月份字符串.
+    mode: 'next' 预测下一个月（默认），'current' 预测最后一个月
     """
     if df_carehome.empty or 'NEWS2 score' not in df_carehome.columns:
         return pd.DataFrame(), None
@@ -200,15 +196,20 @@ def predict_next_month_bayesian(df_carehome, window_length=2, sigma=0.5):
     monthly_counts = df_ch.groupby(['Month', 'NEWS2 score']).size().unstack(fill_value=0)
     
     if len(monthly_counts) < window_length:
-        # 如果数据不足，无法进行预测
         return pd.DataFrame(), None
 
     months = monthly_counts.index.to_timestamp()
-    target_month_period = months[-1].to_period('M') + 1
-    target_month_str = target_month_period.strftime('%Y-%m')
-    
-    # 使用最后 `window_length` 个月的数据作为训练集
-    train_months = months[-(window_length):]
+    if mode == 'next':
+        target_month_period = months[-1].to_period('M') + 1
+        target_month_str = target_month_period.strftime('%Y-%m')
+        train_months = months[-(window_length):]
+    elif mode == 'current':
+        target_month_period = months[-1].to_period('M')
+        target_month_str = target_month_period.strftime('%Y-%m')
+        train_months = months[-window_length:]  # 训练集同样是最近 window_length 个月
+    else:
+        raise ValueError("mode must be 'next' or 'current'")
+
     train_counts = monthly_counts[monthly_counts.index.to_timestamp().isin(train_months)]
 
     results = []
@@ -216,28 +217,20 @@ def predict_next_month_bayesian(df_carehome, window_length=2, sigma=0.5):
 
     for score in score_list:
         if score not in train_counts.columns:
-            # 如果历史数据中没有这个分数，我们仍然可以基于0计数进行预测
             y_train = np.zeros(window_length)
         else:
             y_train = train_counts[score].values
         
-        # 将移动平均值作为先验
         prior_mean = np.mean(y_train)
-        prior_logmu = np.log(prior_mean + 1e-5) # 避免log(0)
+        prior_logmu = np.log(prior_mean + 1e-5)
 
         with pm.Model() as model:
-            # 定义先验
             lam_pred = pm.Lognormal("lam_pred", mu=prior_logmu, sigma=sigma)
-            # 定义似然
             pm.Poisson("obs", mu=lam_pred, observed=y_train)
-            # 运行MCMC采样
-            with open('/dev/null', 'w') as f: # Mute progress bar
+            with open('/dev/null', 'w'):
                 trace = pm.sample(2000, tune=1000, target_accept=0.95, progressbar=False, cores=1)
 
-        # 从后验分布中获取预测
         posterior_lam = trace.posterior["lam_pred"].values
-        
-        # 使用泊松分布从后验lambda生成预测计数
         pred_counts = np.random.poisson(posterior_lam)
 
         results.append({
@@ -743,3 +736,4 @@ def calculate_correlation_data(df, min_months=3):
     return full_df, corr_df, overall_corr_stats
 
 
+ 
