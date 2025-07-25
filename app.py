@@ -122,7 +122,7 @@ if step_title == "Upload Data":
                                        df['Latitude'].isnull().any() or df['Longitude'].isnull().any())
 
                     if needs_geocoding and 'Post Code' in df.columns:
-                        at_nan_before = df['Latitude'].isnull().sum() if 'Latitude' in df.columns else len(df)
+                        lat_nan_before = df['Latitude'].isnull().sum() if 'Latitude' in df.columns else len(df)
 
                         df = geocode_uk_postcodes(df, 'Post Code')
 
