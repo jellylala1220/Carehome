@@ -140,7 +140,7 @@ if step_title == "Upload Data":
                         df['Care Home Name'] = df['Care Home Name'].astype(str)
 
                     # 更新 session state
-    st.session_state['df'] = df
+                    st.session_state['df'] = df
                     st.session_state['processed_file_name'] = main_data_file.name
                     st.session_state['go_analysis'] = False # 仅为新文件重置分析状态
 
