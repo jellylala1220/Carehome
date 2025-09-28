@@ -86,7 +86,7 @@ with st.sidebar:
     """, unsafe_allow_html=True)
     st.markdown("""
     <div style='margin-top: 40px; font-size: 13px; color: #888; text-align: center;'>
-    © 2025 LEI LYU, Supervisor: Prof. Diwei Zhoue, Loughborough University. All rights reserved.
+    © 2025 LEI LYU, Supervisor: Prof. Diwei Zhou, Loughborough University. All rights reserved.
     </div>
     """, unsafe_allow_html=True)
 
