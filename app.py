@@ -128,7 +128,7 @@ if step_title == "Upload Data":
 
                         if 'Latitude' in df.columns:
                             lat_nan_after = df['Latitude'].isnull().sum()
-                            generated_count = lat_nan_before - lat_nan_after
+                            generated_count = at_nan_before - lat_nan_after
                             if generated_count > 0:
                                 st.success(f"Successfully generated coordinates for {generated_count} entries.")
                             if lat_nan_after > 0:
@@ -161,31 +161,31 @@ if step_title == "Upload Data":
         carehome_counts = df['Care Home ID'].value_counts()
         total_count = carehome_counts.sum()
         id_to_name = df.drop_duplicates('Care Home ID').set_index('Care Home ID')['Care Home Name'].astype(str).to_dict()
-        table = carehome_counts.reset_index()
-        table.columns = ['Care Home ID', 'Count']
-        table['Care Home Name'] = table['Care Home ID'].map(id_to_name)
-        table['Percentage'] = (table['Count'] / total_count) * 100
-        table = table[['Care Home ID', 'Care Home Name', 'Count', 'Percentage']]
-        table = table.sort_values('Count', ascending=False).reset_index(drop=True)
-        valid_carehomes = table['Care Home ID'].tolist()
-        all_carehomes = set(df['Care Home ID'].unique())
-        invalid_carehomes = all_carehomes - set(valid_carehomes)
-        valid_count_sum = table['Count'].sum()
+    table = carehome_counts.reset_index()
+    table.columns = ['Care Home ID', 'Count']
+    table['Care Home Name'] = table['Care Home ID'].map(id_to_name)
+    table['Percentage'] = (table['Count'] / total_count) * 100
+    table = table[['Care Home ID', 'Care Home Name', 'Count', 'Percentage']]
+    table = table.sort_values('Count', ascending=False).reset_index(drop=True)
+    valid_carehomes = table['Care Home ID'].tolist()
+    all_carehomes = set(df['Care Home ID'].unique())
+    invalid_carehomes = all_carehomes - set(valid_carehomes)
+    valid_count_sum = table['Count'].sum()
 
-        col1, col2, col3 = st.columns(3)
-        col1.metric("Number of Valid Care Homes", len(valid_carehomes))
-        col2.metric("Number of Invalid Care Homes", len(invalid_carehomes))
-        col3.metric("Total Valid Observations", valid_count_sum)
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Number of Valid Care Homes", len(valid_carehomes))
+    col2.metric("Number of Invalid Care Homes", len(invalid_carehomes))
+    col3.metric("Total Valid Observations", valid_count_sum)
 
-        st.subheader("Care Home Observation Counts (Descending)")
-        st.dataframe(
-            table.style.format({'Percentage': '{:.1f}%'}),
-            use_container_width=True
-        )
+    st.subheader("Care Home Observation Counts (Descending)")
+    st.dataframe(
+        table.style.format({'Percentage': '{:.1f}%'}),
+        use_container_width=True
+    )
 
-        if st.button("Enter Analysis"):
-            st.session_state['go_analysis'] = True
-            st.rerun()
+    if st.button("Enter Analysis"):
+        st.session_state['go_analysis'] = True
+        st.rerun()
 
     # 仅当既没有上传文件，缓存也为空时，才显示警告
     elif main_data_file is None and st.session_state.get('df') is None:
