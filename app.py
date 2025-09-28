@@ -112,7 +112,7 @@ if step_title == "Upload Data":
         if st.session_state.get('processed_file_name') != main_data_file.name:
             try:
                 with st.spinner("Processing new file..."):
-    df = pd.read_excel(main_data_file)
+                    df = pd.read_excel(main_data_file)
 
                     # Clean column names
                     df.columns = [str(col).strip() for col in df.columns]
@@ -140,7 +140,7 @@ if step_title == "Upload Data":
                         df['Care Home Name'] = df['Care Home Name'].astype(str)
 
                     # 更新 session state
-    st.session_state['df'] = df
+                    st.session_state['df'] = df
                     st.session_state['processed_file_name'] = main_data_file.name
                     st.session_state['go_analysis'] = False # 仅为新文件重置分析状态
 
@@ -158,34 +158,34 @@ if step_title == "Upload Data":
         df = st.session_state.df
         # Data overview
         st.subheader("Data Overview")
-    carehome_counts = df['Care Home ID'].value_counts()
-    total_count = carehome_counts.sum()
+        carehome_counts = df['Care Home ID'].value_counts()
+        total_count = carehome_counts.sum()
         id_to_name = df.drop_duplicates('Care Home ID').set_index('Care Home ID')['Care Home Name'].astype(str).to_dict()
-    table = carehome_counts.reset_index()
-    table.columns = ['Care Home ID', 'Count']
-    table['Care Home Name'] = table['Care Home ID'].map(id_to_name)
-    table['Percentage'] = (table['Count'] / total_count) * 100
-    table = table[['Care Home ID', 'Care Home Name', 'Count', 'Percentage']]
-    table = table.sort_values('Count', ascending=False).reset_index(drop=True)
-    valid_carehomes = table['Care Home ID'].tolist()
-    all_carehomes = set(df['Care Home ID'].unique())
-    invalid_carehomes = all_carehomes - set(valid_carehomes)
-    valid_count_sum = table['Count'].sum()
+        table = carehome_counts.reset_index()
+        table.columns = ['Care Home ID', 'Count']
+        table['Care Home Name'] = table['Care Home ID'].map(id_to_name)
+        table['Percentage'] = (table['Count'] / total_count) * 100
+        table = table[['Care Home ID', 'Care Home Name', 'Count', 'Percentage']]
+        table = table.sort_values('Count', ascending=False).reset_index(drop=True)
+        valid_carehomes = table['Care Home ID'].tolist()
+        all_carehomes = set(df['Care Home ID'].unique())
+        invalid_carehomes = all_carehomes - set(valid_carehomes)
+        valid_count_sum = table['Count'].sum()
 
-    col1, col2, col3 = st.columns(3)
-    col1.metric("Number of Valid Care Homes", len(valid_carehomes))
-    col2.metric("Number of Invalid Care Homes", len(invalid_carehomes))
-    col3.metric("Total Valid Observations", valid_count_sum)
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Number of Valid Care Homes", len(valid_carehomes))
+        col2.metric("Number of Invalid Care Homes", len(invalid_carehomes))
+        col3.metric("Total Valid Observations", valid_count_sum)
 
-    st.subheader("Care Home Observation Counts (Descending)")
-    st.dataframe(
-        table.style.format({'Percentage': '{:.1f}%'}),
-        use_container_width=True
-    )
+        st.subheader("Care Home Observation Counts (Descending)")
+        st.dataframe(
+            table.style.format({'Percentage': '{:.1f}%'}),
+            use_container_width=True
+        )
 
-    if st.button("Enter Analysis"):
-        st.session_state['go_analysis'] = True
-        st.rerun()
+        if st.button("Enter Analysis"):
+            st.session_state['go_analysis'] = True
+            st.rerun()
 
     # 仅当既没有上传文件，缓存也为空时，才显示警告
     elif main_data_file is None and st.session_state.get('df') is None:
