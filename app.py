@@ -6,13 +6,13 @@ from data_processor_simple import (
     plot_usage_counts, plot_usage_per_bed, plot_coverage,
     plot_news2_counts, plot_high_risk_prop, plot_concern_prop,
     plot_judgement_accuracy, plot_high_score_params,
-    plot_news2_barchart,  # <-- 新增导入
+    plot_news2_barchart,
     predict_next_month_bayesian,
     calculate_benchmark_data,
     geocode_uk_postcodes,
     get_monthly_regional_benchmark_data,
     calculate_correlation_data,
-    get_news2_color # <-- 新增导入
+    get_news2_color
 )
 import plotly.graph_objects as go
 import plotly.express as px
@@ -60,19 +60,19 @@ with st.sidebar:
     step_title = option_menu(
         menu_title="Navigation",  # 菜单标题
         options=[
-            "Upload Data", 
+            "Upload Data",
             "Care Home Analysis",
-            "Batch Prediction", 
+            "Batch Prediction",
             "Prediction Visualization",
             "Benchmark Grouping",
             "Regional Analysis",
             "Correlation Analysis"
         ],
         icons=[
-            "cloud-upload", 
-            "house", 
-            "cpu", 
-            "graph-up-arrow", 
+            "cloud-upload",
+            "house",
+            "cpu",
+            "graph-up-arrow",
             "bar-chart-line",
             "globe-americas",
             "link-45deg"
@@ -112,50 +112,45 @@ if step_title == "Upload Data":
         if st.session_state.get('processed_file_name') != main_data_file.name:
             try:
                 with st.spinner("Processing new file..."):
-                df = pd.read_excel(main_data_file)
-                    
+    df = pd.read_excel(main_data_file)
+
                     # Clean column names
-                df.columns = [str(col).strip() for col in df.columns]
+                    df.columns = [str(col).strip() for col in df.columns]
 
                     # Geocoding logic
-                needs_geocoding = ('Latitude' not in df.columns or 'Longitude' not in df.columns or
+                    needs_geocoding = ('Latitude' not in df.columns or 'Longitude' not in df.columns or
                                        df['Latitude'].isnull().any() or df['Longitude'].isnull().any())
-                    
-                if needs_geocoding and 'Post Code' in df.columns:
-                    at_nan_before = df['Latitude'].isnull().sum() if 'Latitude' in df.columns else len(df)
-                        
-                    df = geocode_uk_postcodes(df, 'Post Code')
-                        
-                    if 'Latitude' in df.columns:
+
+                    if needs_geocoding and 'Post Code' in df.columns:
+                        at_nan_before = df['Latitude'].isnull().sum() if 'Latitude' in df.columns else len(df)
+
+                        df = geocode_uk_postcodes(df, 'Post Code')
+
+                        if 'Latitude' in df.columns:
                             lat_nan_after = df['Latitude'].isnull().sum()
                             generated_count = lat_nan_before - lat_nan_after
-                        if generated_count > 0:
+                            if generated_count > 0:
                                 st.success(f"Successfully generated coordinates for {generated_count} entries.")
-                        if lat_nan_after > 0:
+                            if lat_nan_after > 0:
                                 st.warning(f"Could not find coordinates for {lat_nan_after} entries. These will be excluded from the map.")
-                    else:
+                        else:
                              st.error("Failed to create 'Latitude'/'Longitude' columns during geocoding.")
 
                     if 'Care Home Name' in df.columns:
                         df['Care Home Name'] = df['Care Home Name'].astype(str)
 
                     # 更新 session state
-                st.session_state['df'] = df
-                st.session_state['processed_file_name'] = main_data_file.name
-                st.session_state['go_analysis'] = False # 仅为新文件重置分析状态
-                
-                # --- 移除 Step 1 DEBUG INFO ---
-                # with st.expander("DEBUG INFO: After Processing & Caching"):
-                #     st.success("Data has been processed and saved to session state.")
-                #     st.write("Columns in DataFrame:", st.session_state.get('df').columns.tolist())
+    st.session_state['df'] = df
+                    st.session_state['processed_file_name'] = main_data_file.name
+                    st.session_state['go_analysis'] = False # 仅为新文件重置分析状态
 
-            st.success("File uploaded and processed successfully!")
-            
-        except Exception as e:
-            st.error(f"Error processing file: {e}")
-            # 出错时清空状态
-            st.session_state['df'] = None
-            st.session_state['processed_file_name'] = None
+                st.success("File uploaded and processed successfully!")
+
+            except Exception as e:
+                st.error(f"Error processing file: {e}")
+                # 出错时清空状态
+                st.session_state['df'] = None
+                st.session_state['processed_file_name'] = None
 
     # --- 改进的显示逻辑 ---
     # 只要缓存中有数据，就显示概览
@@ -195,15 +190,13 @@ if step_title == "Upload Data":
     # 仅当既没有上传文件，缓存也为空时，才显示警告
     elif main_data_file is None and st.session_state.get('df') is None:
         st.warning("Please upload the main data file to begin analysis.")
-        # 在这里确保清理状态，以防用户明确删除了文件
-        # st.session_state['df'] = None
-        # st.session_state['processed_file_name'] = None
-        # st.session_state['go_analysis'] = False
+
     # 增加一个清除数据按钮，用户主动点击才清空
     if st.button("Clear Data"):
         st.session_state['df'] = None
         st.session_state['processed_file_name'] = None
         st.session_state['go_analysis'] = False
+        st.rerun()
 
 
 # Step 2: Care Home Analysis
@@ -214,16 +207,8 @@ elif step_title == "Care Home Analysis":
     if st.session_state['df'] is not None and st.session_state['go_analysis']:
         df = st.session_state['df']
 
-        # --- 移除 DEBUG INFO expander ---
-        # with st.expander("DEBUG INFO: At Start of Step 2"):
-        #     st.info("Data retrieved from session state.")
-        #     st.write("Columns in DataFrame:", df.columns.tolist())
-
-        # 移除侧边栏的分析类型选择
-        # analysis_mode = st.sidebar.radio("Analysis Level", options=["Care Home Level Analysis", "Regional Analysis"], index=0)
-
         # 默认进入 "Care Home Level Analysis" 逻辑
-        
+
         # --- 将护理院选择器从侧边栏移到主页面 ---
         st.subheader("Select Care Home to Analyze")
         df['Care Home Display'] = df['Care Home ID'].astype(str) + " | " + df['Care Home Name'].astype(str)
@@ -233,15 +218,15 @@ elif step_title == "Care Home Analysis":
             .set_index('Care Home ID')['Care Home Display']
             .to_dict()
         )
-        
+
         # 将 selectbox 放在主页面
         care_home_id = st.selectbox(
             "Select Care Home",
-            options=sorted(list(care_home_map.keys())), 
+            options=sorted(list(care_home_map.keys())),
             format_func=lambda x: care_home_map.get(x, x), # 使用 .get() 增加健壮性
             label_visibility="collapsed" # 隐藏标签，因为我们已经有了subheader
         )
-        
+
         st.markdown("---") # 添加分割线
 
         care_home = care_home_id
@@ -263,7 +248,6 @@ elif step_title == "Care Home Analysis":
             st.plotly_chart(plot_usage_counts(usage_df, period), use_container_width=True, key="usage_counts")
             st.plotly_chart(plot_usage_per_bed(usage_df, period), use_container_width=True, key="usage_per_bed")
             if period == "Monthly":
-                # This import is fine here as it's specific to this block
                 from data_processor_simple import calculate_coverage_percentage
                 coverage_df = calculate_coverage_percentage(df[df['Care Home ID'] == care_home])
                 st.plotly_chart(plot_coverage(coverage_df), use_container_width=True, key="coverage")
@@ -273,12 +257,12 @@ elif step_title == "Care Home Analysis":
         with tab2:
             st.header("Health Insights (Based on NEWS2)")
             period2 = st.selectbox("Time Granularity (Health Insights)", ["Daily", "Weekly", "Monthly", "Yearly"], index=2, key="health_period")
-            
+
             hi_data = process_health_insights(df, care_home, period2)
-            
+
             if hi_data.get('news2_counts') is not None and not hi_data['news2_counts'].empty:
                 all_scores = sorted(hi_data['news2_counts'].columns)
-                
+
                 # --- 新增：动态生成颜色图例 ---
                 legend_items = []
                 for score in all_scores:
@@ -323,7 +307,7 @@ elif step_title == "Batch Prediction":
         st.warning("This module is password protected. Please enter the password to continue.")
         # 在实际应用中，应使用 st.secrets 来安全地存储密码
         CORRECT_PASSWORD = "admin"
-        
+
         with st.form("password_form"):
             password = st.text_input("Password", type="password")
             submitted = st.form_submit_button("Authenticate")
@@ -442,14 +426,14 @@ elif step_title == "Prediction Visualization":
                 how='left',
                 on=['Care Home ID', 'Care Home Name', 'Month', 'NEWS2 Score']
             )
-            
+
             merged_df['Care Home Display'] = merged_df['Care Home ID'].astype(str) + " | " + merged_df['Care Home Name'].astype(str)
 
             # --- 新增：护理院选择下拉菜单 ---
             st.subheader("Filter by Care Home")
             all_care_homes_option = "All Care Homes"
             care_home_options = [all_care_homes_option] + sorted(merged_df['Care Home Display'].unique())
-            
+
             selected_care_home = st.selectbox(
                 "Select a care home to view its specific data and charts:",
                 options=care_home_options
@@ -462,15 +446,18 @@ elif step_title == "Prediction Visualization":
             else:
                 display_df = merged_df[merged_df['Care Home Display'] == selected_care_home]
                 care_homes_to_plot = [selected_care_home]
-            
+
             # --- 修改：显示重新排序和筛选后的表格 ---
             st.subheader("Combined Prediction and Actual Data")
-            
+
             # 重新排序，将关键列放在前面
             front_cols = ['Care Home ID', 'Care Home Name', 'Month']
+            actual_cols = display_df.columns.tolist()
+            front_cols_in_df = [col for col in front_cols if col in actual_cols]
             other_cols = [col for col in display_df.columns if col not in front_cols and col != 'Care Home Display']
-            display_df_ordered = display_df[front_cols + other_cols]
-            
+            other_cols_in_df = [col for col in other_cols if col in actual_cols and col not in front_cols_in_df]
+            display_df_ordered = display_df[front_cols_in_df + other_cols_in_df]
+
             st.dataframe(display_df_ordered, use_container_width=True)
 
             # --- 修改：根据筛选结果显示图表 ---
@@ -479,14 +466,14 @@ elif step_title == "Prediction Visualization":
             for care_home_display in care_homes_to_plot:
                 st.markdown(f"---")
                 st.markdown(f"### {care_home_display}")
-                
+
                 # 从已筛选的DataFrame中获取数据，而不是从原始的merged_df中获取
                 care_home_data_to_plot = display_df[display_df['Care Home Display'] == care_home_display]
                 care_home_id = care_home_data_to_plot['Care Home ID'].iloc[0]
-                
+
                 full_hist_ch = actual_counts[actual_counts['Care Home ID'] == care_home_id]
                 pred_ch = care_home_data_to_plot
-                
+
                 # --- 新增：为当前护理院的所有图表计算一个统一的Y轴范围 ---
                 max_y_hist = full_hist_ch['Actual'].max()
                 max_y_pred = pred_ch['95% Upper'].max()
@@ -494,7 +481,7 @@ elif step_title == "Prediction Visualization":
                 max_y_pred = 0 if pd.isna(max_y_pred) else max_y_pred
                 overall_max_y = max(max_y_hist, max_y_pred)
                 # 设置一个最小范围5，并增加15%的顶部空间，确保图表不会被压扁
-                yaxis_range = [0, max(5, overall_max_y * 1.15)] 
+                yaxis_range = [0, max(5, overall_max_y * 1.15)]
 
                 score_list = sorted(pred_ch['NEWS2 Score'].unique())
 
@@ -506,10 +493,10 @@ elif step_title == "Prediction Visualization":
                     if hist_score_df.empty:
                         st.markdown(f"**NEWS2 Score = {score}:** No historical data available, so no chart is generated.")
                         continue
-                    
+
                     # --- 如果有数据，则继续绘图 ---
                     fig = go.Figure()
-                    
+
                     # --- 根据分数获取颜色 ---
                     color_details = get_news2_color(score)
                     score_color = color_details['background']
@@ -569,19 +556,15 @@ elif step_title == "Benchmark Grouping":
         st.warning("Please upload data in Step 1 to begin this analysis.")
     else:
         df_full = st.session_state['df']
-        
-        # 为了生成箱线图和热力图，我们需要原始的月度数据
-        # 我们需要一个新的函数来只计算这部分
-        # (为了快速实现，我们暂时在这里复制逻辑，理想状态下应重构 data_processor)
-        
+
         # --- 为箱线图和热力图准备月度数据 ---
         df_copy = df_full.copy()
         df_copy['Date/Time'] = pd.to_datetime(df_copy['Date/Time'])
         df_copy['Month'] = df_copy['Date/Time'].dt.strftime('%Y-%m')
         if 'No of Beds' not in df_copy.columns:
             st.error("Source data must contain 'No of Beds' column for this analysis.")
-               st.stop()
-        
+            st.stop()
+
         beds_info = df_copy.drop_duplicates(subset=['Care Home ID']).set_index('Care Home ID')['No of Beds']
         monthly_counts = df_copy.groupby(['Care Home ID', 'Care Home Name', 'Month']).size().reset_index(name='Monthly Observations')
         monthly_benchmark_df = pd.merge(monthly_counts, beds_info, on='Care Home ID')
@@ -598,7 +581,7 @@ elif step_title == "Benchmark Grouping":
         monthly_benchmark_df['Group'] = np.select(conditions, choices, default='Medium')
         group_map = {'Low': 0, 'Medium': 1, 'High': 2}
         monthly_benchmark_df['Group Value'] = monthly_benchmark_df['Group'].map(group_map)
-        
+
         # --- 现在开始计算地理分布数据 ---
         geospatial_df = calculate_benchmark_data(df_full)
 
@@ -609,14 +592,14 @@ elif step_title == "Benchmark Grouping":
             monthly_benchmark_df['Year'] = pd.to_datetime(monthly_benchmark_df['Month']).dt.year
             available_years = sorted(monthly_benchmark_df['Year'].unique(), reverse=True)
             year_options = ["All Years"] + available_years
-            
+
             selected_year = st.selectbox(
                 "Select Year to Display",
                 options=year_options,
                 index=0,
                 key="benchmark_year_select"
             )
-            
+
             # 根据选择的年份筛选数据
             if selected_year == "All Years":
                 data_to_plot = monthly_benchmark_df
@@ -628,7 +611,7 @@ elif step_title == "Benchmark Grouping":
             # 1. 箱线图 (Boxplot) - 使用筛选后的数据
             st.subheader(f"Monthly Distribution of Usage per Bed {title_suffix}")
             st.markdown("This boxplot shows the distribution of 'average usage per bed' across all care homes for each month.")
-            
+
             sorted_months = sorted(data_to_plot['Month'].unique())
 
             fig_box = px.box(
@@ -690,7 +673,7 @@ elif step_title == "Benchmark Grouping":
 
             # 3. 新增：地理分布图
             st.subheader("Geospatial Distribution of High Usage Frequency")
-            
+
             if 'Latitude' not in geospatial_df.columns or 'Longitude' not in geospatial_df.columns:
                 st.warning("Geospatial map cannot be generated because 'Latitude' and/or 'Longitude' columns are missing in the source data.")
             else:
@@ -703,13 +686,13 @@ elif step_title == "Benchmark Grouping":
                 ]
                 choices = ['Low', 'High']
                 geospatial_df['pi_group'] = np.select(conditions, choices, default='Medium')
-                
+
                 color_map = {'Low': 'red', 'Medium': 'yellow', 'High': 'green'}
-                
+
                 # --- 改进：创建一个新的列用于大小，确保 pi=0 的点可见且大小差异更明显 ---
                 # 添加一个很小的基数，然后放大，使得大小差异更显著
                 geospatial_df['size'] = (geospatial_df['pi'] * 20) + 5
-                
+
                 # --- 新增：为重叠点添加“抖动”以改善可见性 ---
                 # 定义抖动幅度 (约等于 +/- 200米)
                 jitter_amount = 0.002
@@ -772,7 +755,7 @@ elif step_title == "Regional Analysis":
         st.warning("Please upload data in Step 1 to begin this analysis.")
     else:
         df = st.session_state['df']
-        
+
         if 'Area' not in df.columns or 'No of Beds' not in df.columns:
             st.error("Source data must contain 'Area' and 'No of Beds' columns for this analysis.")
         else:
@@ -785,7 +768,7 @@ elif step_title == "Regional Analysis":
                 monthly_df_full['Year'] = pd.to_datetime(monthly_df_full['Month']).dt.year
                 regional_available_years = sorted(monthly_df_full['Year'].unique(), reverse=True)
                 regional_year_options = ["All Years"] + regional_available_years
-                
+
                 selected_regional_year = st.selectbox(
                     "Select Year to Display",
                     options=regional_year_options,
@@ -800,7 +783,7 @@ elif step_title == "Regional Analysis":
                 else:
                     monthly_df = monthly_df_full[monthly_df_full['Year'] == selected_regional_year]
                     regional_title_suffix = f"for {selected_regional_year}"
-                
+
                 sorted_months = sorted(monthly_df['Month'].unique())
 
                 st.subheader(f"Part 1. Monthly Usage per Bed by Area {regional_title_suffix}")
@@ -828,8 +811,8 @@ elif step_title == "Regional Analysis":
                 summary['Percentage'] = summary['Count'] / summary['Total']
 
                 selected_month = st.selectbox(
-                    "Select Month to View Benchmark Split", 
-                    options=sorted_months, 
+                    "Select Month to View Benchmark Split",
+                    options=sorted_months,
                     index=len(sorted_months)-1
                 )
 
@@ -845,16 +828,16 @@ elif step_title == "Regional Analysis":
                     )
                     fig_bar.update_yaxes(tickformat=".0%")
                     st.plotly_chart(beautify_line_chart(fig_bar), use_container_width=True)
-                
+
                 st.markdown("---")
 
                 st.subheader("Part 3. Detailed Grouping Data")
                 st.markdown("This table provides the detailed numbers and percentages used for the benchmark grouping chart above.")
-                
+
                 display_summary = summary[['Month', 'Area', 'Group', 'Count', 'Total', 'Percentage']].copy()
                 display_summary['Percentage'] = (display_summary['Percentage'] * 100).map('{:.1f}%'.format)
                 st.dataframe(display_summary, use_container_width=True)
-                
+
                 csv = summary.to_csv(index=False).encode('utf-8')
                 st.download_button(
                     label="Download Detailed Grouping Data (.csv)",
@@ -915,13 +898,13 @@ elif step_title == "Correlation Analysis":
                     st.plotly_chart(beautify_line_chart(fig_scatter), use_container_width=True)
                 else:
                     st.info("Could not calculate overall correlation due to insufficient data or lack of variance.")
-                
+
                 st.markdown("---")
 
                 # Part C: Per-Care-Home Analysis
                 st.subheader("Section 2. Correlation Coefficient Summary (Per Care Home)")
                 st.markdown("This table shows the Pearson and Spearman correlation coefficients between 'High NEWS Count' and 'Usage per Bed' for each care home.")
-                
+
                 st.dataframe(corr_summary_df.style.format({
                     'Pearson r': '{:.3f}', 'Pearson p-value': '{:.3f}',
                     'Spearman r': '{:.3f}', 'Spearman p-value': '{:.3f}'
@@ -961,7 +944,7 @@ elif step_title == "Correlation Analysis":
                     .set_index('Care Home ID')['Care Home Name']
                     .to_dict()
                 )
-                
+
                 selected_care_home_id = st.selectbox(
                     "Select Care Home for Trend Analysis",
                     options=sorted(list(care_home_map.keys())),
@@ -970,21 +953,21 @@ elif step_title == "Correlation Analysis":
 
                 if selected_care_home_id:
                     sub = monthly_corr_df[monthly_corr_df['Care Home ID'] == selected_care_home_id].sort_values('Month')
-                    
+
                     fig = go.Figure()
-                    
+
                     fig.add_trace(go.Scatter(
                         x=sub['Month'], y=sub['High NEWS Count'], name='High NEWS (≥6) Count',
                         mode='lines+markers', yaxis='y1',
                         line=dict(color='blue'), marker=dict(color='blue')
                     ))
-                    
+
                     fig.add_trace(go.Scatter(
                         x=sub['Month'], y=sub['Usage per Bed'], name='Avg Usage per Bed',
                         mode='lines+markers', yaxis='y2',
                         line=dict(color='red'), marker=dict(color='red')
                     ))
-                    
+
                     fig.update_layout(
                         title_text=f"<b>Care Home: {care_home_map[selected_care_home_id]}</b>",
                         xaxis_title="Month",
