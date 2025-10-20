@@ -86,7 +86,7 @@ with st.sidebar:
     """, unsafe_allow_html=True)
     st.markdown("""
     <div style='margin-top: 40px; font-size: 13px; color: #888; text-align: center;'>
-    © 2025 LEI LYU, Supervisor: Prof. Diwei Zhou, Loughborough University. All rights reserved.
+    © 2025 Inventors: Professor Diwei Zhou (Loughborough University) and Lei Lyu (PhD student). Contributor: Tara Marshall (These Hands Academy Ltd).
     </div>
     """, unsafe_allow_html=True)
 
