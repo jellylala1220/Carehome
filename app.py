@@ -31,6 +31,18 @@ NAV_OPTIONS = [
     "Correlation Analysis"
 ]
 
+NAV_LABELS = [
+    "Upload",
+    "Care Home",
+    "Predict",
+    "Validate",
+    "Benchmark",
+    "Regional",
+    "Correlation"
+]
+
+NAV_LABEL_TO_PAGE = dict(zip(NAV_LABELS, NAV_OPTIONS))
+
 NAV_ICONS = [
     "cloud-upload",
     "house",
@@ -111,6 +123,23 @@ def inject_ui_css():
             border-radius: 0 8px 8px 0;
         }
         .phase2-step strong {
+            color: #0f172a;
+        }
+        section[data-testid="stSidebar"] .stMarkdown {
+            overflow-wrap: normal;
+            word-break: normal;
+        }
+        .sidebar-status {
+            font-size: 13px;
+            line-height: 1.45;
+            color: #334155;
+            background: #f8fafc;
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            padding: 10px 12px;
+            margin-top: 4px;
+        }
+        .sidebar-status strong {
             color: #0f172a;
         }
         </style>
@@ -264,6 +293,29 @@ def render_dataset_status(df):
     col4.metric("Last Date", date_series.max().date().isoformat() if not date_series.dropna().empty else "N/A")
 
 
+def render_sidebar_dataset_status(df):
+    if df is None:
+        st.info("No data loaded.")
+        return
+
+    date_series = pd.to_datetime(df['Date/Time'], errors='coerce') if 'Date/Time' in df.columns else pd.Series(dtype='datetime64[ns]')
+    first_date = date_series.min().date().isoformat() if not date_series.dropna().empty else "N/A"
+    last_date = date_series.max().date().isoformat() if not date_series.dropna().empty else "N/A"
+    care_home_count = df['Care Home ID'].nunique() if 'Care Home ID' in df.columns else "N/A"
+
+    st.markdown(
+        f"""
+        <div class="sidebar-status">
+            <strong>Loaded data</strong><br>
+            Observations: {len(df):,}<br>
+            Care homes: {care_home_count}<br>
+            Date: {first_date} to {last_date}
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 def render_need_data_actions():
     st.warning("Please upload the Phase 2 working data before using this page.")
     st.button(
@@ -293,9 +345,9 @@ def render_phase2_workflow():
 with st.sidebar:
     nav_target = st.session_state.get('nav_target')
     manual_select = NAV_OPTIONS.index(nav_target) if nav_target in NAV_OPTIONS else None
-    step_title = option_menu(
+    selected_nav_label = option_menu(
         menu_title="Navigation",  # 菜单标题
-        options=NAV_OPTIONS,
+        options=NAV_LABELS,
         icons=NAV_ICONS,
         menu_icon="cast",  # 菜单图标
         default_index=0,  # 默认选中的按钮
@@ -305,20 +357,22 @@ with st.sidebar:
             "container": {"padding": "0!important", "background-color": "#ffffff"},
             "icon": {"color": "#2563eb", "font-size": "18px"},
             "nav-link": {
-                "font-size": "15px",
+                "font-size": "14px",
                 "text-align": "left",
                 "margin": "3px 0",
                 "--hover-color": "#eff6ff",
                 "border-radius": "8px",
                 "font-weight": "600",
+                "white-space": "nowrap",
             },
             "nav-link-selected": {"background-color": "#2563eb", "font-weight": "700"},
         },
     )
+    step_title = NAV_LABEL_TO_PAGE[selected_nav_label]
     st.session_state['nav_target'] = None
 
     st.markdown("---")
-    render_dataset_status(st.session_state.get('df'))
+    render_sidebar_dataset_status(st.session_state.get('df'))
 
     # 保证 copy right 在侧边栏最下方
     st.markdown("""
