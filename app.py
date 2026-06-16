@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import hashlib
 from data_processor_simple import (
     get_care_home_list, get_care_home_info, 
     process_usage_data, process_health_insights,
@@ -16,9 +17,37 @@ from data_processor_simple import (
 )
 import plotly.graph_objects as go
 import plotly.express as px
-from io import StringIO
+from io import BytesIO
 import numpy as np
 from streamlit_option_menu import option_menu
+
+NAV_OPTIONS = [
+    "Upload Data",
+    "Care Home Analysis",
+    "Batch Prediction",
+    "Prediction Visualization",
+    "Benchmark Grouping",
+    "Regional Analysis",
+    "Correlation Analysis"
+]
+
+NAV_ICONS = [
+    "cloud-upload",
+    "house",
+    "cpu",
+    "graph-up-arrow",
+    "bar-chart-line",
+    "globe-americas",
+    "link-45deg"
+]
+
+PHASE2_FLOW = [
+    ("1", "Prepare working data", "Cleaned Phase 2 observations are uploaded here."),
+    ("2", "Care home review", "Check usage, coverage, NEWS2 trends, and high-score drivers."),
+    ("3", "Prediction run", "Generate next-month NEWS2 predictions for eligible care homes."),
+    ("4", "Validation", "Compare predictions with actual monthly NEWS2 counts."),
+    ("5", "Population analysis", "Benchmark care homes by usage, area, and high-NEWS correlation."),
+]
 
 # ----------- 统一美化所有 plotly 折线图 -----------
 def beautify_line_chart(fig):
@@ -43,6 +72,55 @@ def beautify_line_chart(fig):
 
 st.set_page_config(page_title="Care Home Analysis Dashboard", layout="wide")
 
+
+def inject_ui_css():
+    st.markdown(
+        """
+        <style>
+        div.stButton > button,
+        div.stDownloadButton > button {
+            min-height: 44px;
+            border-radius: 8px;
+            font-weight: 700;
+            letter-spacing: 0;
+        }
+        div.stButton > button[kind="primary"],
+        div.stDownloadButton > button[kind="primary"] {
+            box-shadow: 0 2px 8px rgba(15, 23, 42, 0.12);
+        }
+        .stDataFrame tbody tr td {
+            font-size: 18px !important;
+        }
+        .stDataFrame thead tr th {
+            font-size: 18px !important;
+        }
+        div[data-testid="stMetric"] {
+            background: #ffffff;
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            padding: 12px 14px;
+        }
+        div[data-testid="stAlert"] {
+            border-radius: 8px;
+        }
+        .phase2-step {
+            border-left: 4px solid #2563eb;
+            padding: 8px 12px;
+            margin: 6px 0;
+            background: #f8fafc;
+            border-radius: 0 8px 8px 0;
+        }
+        .phase2-step strong {
+            color: #0f172a;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+inject_ui_css()
+
 # Initialize session state
 if 'df' not in st.session_state:
     st.session_state['df'] = None
@@ -54,39 +132,201 @@ if 'processed_file_name' not in st.session_state:
     st.session_state['processed_file_name'] = None
 if 'batch_prediction_authenticated' not in st.session_state:
     st.session_state['batch_prediction_authenticated'] = False
+if 'nav_target' not in st.session_state:
+    st.session_state['nav_target'] = None
+
+
+def navigate_to(page_name):
+    st.session_state['nav_target'] = page_name
+
+
+def clear_loaded_data():
+    st.session_state['df'] = None
+    st.session_state['processed_file_name'] = None
+    st.session_state['processed_file_signature'] = None
+    st.session_state['go_analysis'] = False
+    st.session_state['prediction_df'] = None
+
+
+def file_signature(file_name, file_bytes):
+    digest = hashlib.md5(file_bytes).hexdigest()
+    return f"{file_name}:{len(file_bytes)}:{digest}"
+
+
+@st.cache_data(show_spinner=False)
+def load_observation_data(file_name, file_bytes):
+    df = pd.read_excel(BytesIO(file_bytes))
+    df.columns = [str(col).strip() for col in df.columns]
+
+    if 'Date/Time' in df.columns:
+        df['Date/Time'] = pd.to_datetime(df['Date/Time'], errors='coerce')
+    if 'Care Home ID' in df.columns:
+        df['Care Home ID'] = (
+            df['Care Home ID']
+            .astype(str)
+            .str.replace(r'\.0$', '', regex=True)
+            .str.strip()
+        )
+    if 'Care Home Name' in df.columns:
+        df['Care Home Name'] = df['Care Home Name'].astype(str).str.strip()
+
+    numeric_cols = [
+        'No of Beds', 'NEWS2 score', 'New2 Score_New', 'O2', 'O2_New',
+        'Systolic', 'Systolic_New', 'Diasolic', 'Pulse', 'Pulse_New',
+        'Temperature', 'Temperate_New', 'Respiration rate',
+        'Respiraties_New', 'O2 Delivery_New', 'Consciouness New',
+        'Latitude', 'Longitude'
+    ]
+    for col in numeric_cols:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors='coerce')
+
+    report = {
+        'coordinates_generated': 0,
+        'coordinates_missing': None,
+        'geocoding_attempted': False,
+    }
+
+    needs_geocoding = (
+        'Latitude' not in df.columns or
+        'Longitude' not in df.columns or
+        df['Latitude'].isnull().any() or
+        df['Longitude'].isnull().any()
+    )
+
+    if needs_geocoding and 'Post Code' in df.columns:
+        report['geocoding_attempted'] = True
+        missing_before = df['Latitude'].isnull().sum() if 'Latitude' in df.columns else len(df)
+        df = geocode_uk_postcodes(df, 'Post Code')
+        if 'Latitude' in df.columns:
+            missing_after = df['Latitude'].isnull().sum()
+            report['coordinates_generated'] = int(missing_before - missing_after)
+            report['coordinates_missing'] = int(missing_after)
+
+    return df, report
+
+
+@st.cache_data(show_spinner=False)
+def cached_health_insights(df, care_home_id, period):
+    return process_health_insights(df, care_home_id, period)
+
+
+@st.cache_data(show_spinner=False)
+def cached_benchmark_data(df):
+    return calculate_benchmark_data(df)
+
+
+@st.cache_data(show_spinner=False)
+def cached_monthly_benchmark_table(df):
+    df_copy = df.copy()
+    df_copy['Date/Time'] = pd.to_datetime(df_copy['Date/Time'])
+    df_copy['Month'] = df_copy['Date/Time'].dt.strftime('%Y-%m')
+
+    beds_info = df_copy.drop_duplicates(subset=['Care Home ID']).set_index('Care Home ID')['No of Beds']
+    monthly_counts = df_copy.groupby(['Care Home ID', 'Care Home Name', 'Month']).size().reset_index(name='Monthly Observations')
+    monthly_benchmark_df = pd.merge(monthly_counts, beds_info, on='Care Home ID')
+    monthly_benchmark_df = monthly_benchmark_df[monthly_benchmark_df['No of Beds'] > 0]
+    monthly_benchmark_df['Usage per Bed'] = monthly_benchmark_df['Monthly Observations'] / monthly_benchmark_df['No of Beds']
+    quartiles = monthly_benchmark_df.groupby('Month')['Usage per Bed'].quantile([0.25, 0.75]).unstack()
+    quartiles.columns = ['Q1', 'Q3']
+    monthly_benchmark_df = pd.merge(monthly_benchmark_df, quartiles, on='Month', how='left')
+    conditions = [
+        monthly_benchmark_df['Usage per Bed'] >= monthly_benchmark_df['Q3'],
+        monthly_benchmark_df['Usage per Bed'] <= monthly_benchmark_df['Q1']
+    ]
+    choices = ['High', 'Low']
+    monthly_benchmark_df['Group'] = np.select(conditions, choices, default='Medium')
+    group_map = {'Low': 0, 'Medium': 1, 'High': 2}
+    monthly_benchmark_df['Group Value'] = monthly_benchmark_df['Group'].map(group_map)
+    return monthly_benchmark_df
+
+
+@st.cache_data(show_spinner=False)
+def cached_monthly_regional_data(df):
+    return get_monthly_regional_benchmark_data(df)
+
+
+@st.cache_data(show_spinner=False)
+def cached_correlation_data(df, min_months):
+    return calculate_correlation_data(df, min_months=min_months)
+
+
+def render_dataset_status(df):
+    if df is None:
+        st.warning("No data loaded. Upload the Phase 2 working data first.")
+        return
+
+    date_series = pd.to_datetime(df['Date/Time'], errors='coerce') if 'Date/Time' in df.columns else pd.Series(dtype='datetime64[ns]')
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Observations", f"{len(df):,}")
+    col2.metric("Care Homes", f"{df['Care Home ID'].nunique():,}" if 'Care Home ID' in df.columns else "N/A")
+    col3.metric("First Date", date_series.min().date().isoformat() if not date_series.dropna().empty else "N/A")
+    col4.metric("Last Date", date_series.max().date().isoformat() if not date_series.dropna().empty else "N/A")
+
+
+def render_need_data_actions():
+    st.warning("Please upload the Phase 2 working data before using this page.")
+    st.button(
+        "Go to Upload Data",
+        type="primary",
+        icon=":material/upload_file:",
+        use_container_width=True,
+        on_click=navigate_to,
+        args=("Upload Data",),
+    )
+
+
+def render_phase2_workflow():
+    with st.expander("Phase 2 workflow", expanded=True):
+        for number, title, detail in PHASE2_FLOW:
+            st.markdown(
+                f"""
+                <div class="phase2-step">
+                    <strong>{number}. {title}</strong><br>
+                    <span>{detail}</span>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
 
 # Sidebar navigation - 改用新的 option_menu
 with st.sidebar:
+    nav_target = st.session_state.get('nav_target')
+    manual_select = NAV_OPTIONS.index(nav_target) if nav_target in NAV_OPTIONS else None
     step_title = option_menu(
         menu_title="Navigation",  # 菜单标题
-        options=[
-            "Upload Data",
-            "Care Home Analysis",
-            "Batch Prediction",
-            "Prediction Visualization",
-            "Benchmark Grouping",
-            "Regional Analysis",
-            "Correlation Analysis"
-        ],
-        icons=[
-            "cloud-upload",
-            "house",
-            "cpu",
-            "graph-up-arrow",
-            "bar-chart-line",
-            "globe-americas",
-            "link-45deg"
-        ],
+        options=NAV_OPTIONS,
+        icons=NAV_ICONS,
         menu_icon="cast",  # 菜单图标
         default_index=0,  # 默认选中的按钮
+        manual_select=manual_select,
+        key="main_navigation",
+        styles={
+            "container": {"padding": "0!important", "background-color": "#ffffff"},
+            "icon": {"color": "#2563eb", "font-size": "18px"},
+            "nav-link": {
+                "font-size": "15px",
+                "text-align": "left",
+                "margin": "3px 0",
+                "--hover-color": "#eff6ff",
+                "border-radius": "8px",
+                "font-weight": "600",
+            },
+            "nav-link-selected": {"background-color": "#2563eb", "font-weight": "700"},
+        },
     )
+    st.session_state['nav_target'] = None
+
+    st.markdown("---")
+    render_dataset_status(st.session_state.get('df'))
+
     # 保证 copy right 在侧边栏最下方
     st.markdown("""
     <div style='flex:1'></div>
     """, unsafe_allow_html=True)
     st.markdown("""
     <div style='margin-top: 40px; font-size: 13px; color: #888; text-align: center;'>
-    © 2025 Inventors: Professor Diwei Zhou (Loughborough University) and Lei Lyu (PhD student). Contributor: Tara Marshall (These Hands Academy Ltd).
+    © 2025 Inventors: Professor Diwei Zhou (Loughborough University) and Lei Lyu (PhD student). Contributor: Tara Marshall (These Hands Academy Ltd)
     </div>
     """, unsafe_allow_html=True)
 
@@ -101,63 +341,49 @@ with col3:
 # Step 1: Upload Data
 if step_title == "Upload Data":
     st.title("Care Home Analysis Dashboard")
-    st.header("Step 1: Upload Data")
+    st.header("Step 1: Upload Phase 2 Working Data")
 
-    main_data_file = st.file_uploader("Upload Observation Data (Excel)", type=["xlsx"])
-#  --- 改进缓存逻辑 ---
-    # --- 改进缓存逻辑 ---
-    # 只有当上传了新文件时，才执行处理逻辑
+    render_phase2_workflow()
+
+    main_data_file = st.file_uploader(
+        "Upload Observation Data (Excel)",
+        type=["xlsx"],
+        help="Use the cleaned Phase 2 working data file generated from the local pipeline.",
+        width="stretch",
+    )
+
     if main_data_file is not None:
-        # 检查是否是与缓存中不同的新文件
-        if st.session_state.get('processed_file_name') != main_data_file.name:
+        file_bytes = main_data_file.getvalue()
+        current_signature = file_signature(main_data_file.name, file_bytes)
+
+        if st.session_state.get('processed_file_signature') != current_signature:
             try:
-                with st.spinner("Processing new file..."):
-                    df = pd.read_excel(main_data_file)
-
-                    # Clean column names
-                    df.columns = [str(col).strip() for col in df.columns]
-
-                    # Geocoding logic
-                    needs_geocoding = ('Latitude' not in df.columns or 'Longitude' not in df.columns or
-                                       df['Latitude'].isnull().any() or df['Longitude'].isnull().any())
-
-                    if needs_geocoding and 'Post Code' in df.columns:
-                        at_nan_before = df['Latitude'].isnull().sum() if 'Latitude' in df.columns else len(df)
-
-                        df = geocode_uk_postcodes(df, 'Post Code')
-
-                        if 'Latitude' in df.columns:
-                            lat_nan_after = df['Latitude'].isnull().sum()
-                            generated_count = at_nan_before - lat_nan_after
-                            if generated_count > 0:
-                                st.success(f"Successfully generated coordinates for {generated_count} entries.")
-                            if lat_nan_after > 0:
-                                st.warning(f"Could not find coordinates for {lat_nan_after} entries. These will be excluded from the map.")
-                        else:
-                             st.error("Failed to create 'Latitude'/'Longitude' columns during geocoding.")
-
-                    if 'Care Home Name' in df.columns:
-                        df['Care Home Name'] = df['Care Home Name'].astype(str)
-
-                    # 更新 session state
+                with st.spinner("Loading and preparing the uploaded workbook..."):
+                    df, load_report = load_observation_data(main_data_file.name, file_bytes)
                     st.session_state['df'] = df
                     st.session_state['processed_file_name'] = main_data_file.name
-                    st.session_state['go_analysis'] = False # 仅为新文件重置分析状态
+                    st.session_state['processed_file_signature'] = current_signature
+                    st.session_state['go_analysis'] = True
+                    st.session_state['prediction_df'] = None
 
-                st.success("File uploaded and processed successfully!")
+                st.success("Data loaded and ready for analysis.")
+                if load_report.get('coordinates_generated', 0) > 0:
+                    st.info(f"Generated coordinates for {load_report['coordinates_generated']} rows.")
+                if load_report.get('coordinates_missing'):
+                    st.warning(f"{load_report['coordinates_missing']} rows still have missing coordinates and may be excluded from map views.")
 
             except Exception as e:
                 st.error(f"Error processing file: {e}")
-                # 出错时清空状态
-                st.session_state['df'] = None
-                st.session_state['processed_file_name'] = None
+                clear_loaded_data()
+        else:
+            st.info(f"Using cached data from `{main_data_file.name}`.")
 
-    # --- 改进的显示逻辑 ---
-    # 只要缓存中有数据，就显示概览
     if st.session_state.get('df') is not None:
         df = st.session_state.df
-        # Data overview
-        st.subheader("Data Overview")
+
+        st.subheader("Loaded Dataset")
+        render_dataset_status(df)
+
         carehome_counts = df['Care Home ID'].value_counts()
         total_count = carehome_counts.sum()
         id_to_name = df.drop_duplicates('Care Home ID').set_index('Care Home ID')['Care Home Name'].astype(str).to_dict()
@@ -167,36 +393,45 @@ if step_title == "Upload Data":
         table['Percentage'] = (table['Count'] / total_count) * 100
         table = table[['Care Home ID', 'Care Home Name', 'Count', 'Percentage']]
         table = table.sort_values('Count', ascending=False).reset_index(drop=True)
-        valid_carehomes = table['Care Home ID'].tolist()
-        all_carehomes = set(df['Care Home ID'].unique())
-        invalid_carehomes = all_carehomes - set(valid_carehomes)
-        valid_count_sum = table['Count'].sum()
 
-        col1, col2, col3 = st.columns(3)
-        col1.metric("Number of Valid Care Homes", len(valid_carehomes))
-        col2.metric("Number of Invalid Care Homes", len(invalid_carehomes))
-        col3.metric("Total Valid Observations", valid_count_sum)
+        action_col1, action_col2, action_col3 = st.columns([1.3, 1.3, 1])
+        with action_col1:
+            if st.button(
+                "Open Care Home Analysis",
+                type="primary",
+                icon=":material/analytics:",
+                use_container_width=True,
+            ):
+                st.session_state['go_analysis'] = True
+                navigate_to("Care Home Analysis")
+                st.rerun()
+        with action_col2:
+            if st.button(
+                "Go to Benchmarking",
+                icon=":material/bar_chart:",
+                use_container_width=True,
+            ):
+                navigate_to("Benchmark Grouping")
+                st.rerun()
+        with action_col3:
+            if st.button(
+                "Clear Data",
+                icon=":material/delete:",
+                use_container_width=True,
+                help="Remove the loaded workbook from this session.",
+            ):
+                clear_loaded_data()
+                st.rerun()
 
-        st.subheader("Care Home Observation Counts (Descending)")
-        st.dataframe(
-            table.style.format({'Percentage': '{:.1f}%'}),
-            use_container_width=True
-        )
+        with st.expander("Care Home Observation Counts", expanded=False):
+            st.dataframe(
+                table.style.format({'Percentage': '{:.1f}%'}),
+                use_container_width=True,
+                hide_index=True,
+            )
 
-        if st.button("Enter Analysis"):
-            st.session_state['go_analysis'] = True
-            st.rerun()
-
-    # 仅当既没有上传文件，缓存也为空时，才显示警告
     elif main_data_file is None and st.session_state.get('df') is None:
         st.warning("Please upload the main data file to begin analysis.")
-
-    # 增加一个清除数据按钮，用户主动点击才清空
-    if st.button("Clear Data"):
-        st.session_state['df'] = None
-        st.session_state['processed_file_name'] = None
-        st.session_state['go_analysis'] = False
-        st.rerun()
 
 
 # Step 2: Care Home Analysis
@@ -204,8 +439,9 @@ elif step_title == "Care Home Analysis":
     st.title("Care Home Analysis Dashboard")
     st.header("Step 2: Care Home Analysis")
 
-    if st.session_state['df'] is not None and st.session_state['go_analysis']:
-        df = st.session_state['df']
+    if st.session_state['df'] is not None:
+        df = st.session_state['df'].copy()
+        render_dataset_status(df)
 
         # 默认进入 "Care Home Level Analysis" 逻辑
 
@@ -224,7 +460,7 @@ elif step_title == "Care Home Analysis":
             "Select Care Home",
             options=sorted(list(care_home_map.keys())),
             format_func=lambda x: care_home_map.get(x, x), # 使用 .get() 增加健壮性
-            label_visibility="collapsed" # 隐藏标签，因为我们已经有了subheader
+            placeholder="Choose a care home"
         )
 
         st.markdown("---") # 添加分割线
@@ -244,12 +480,13 @@ elif step_title == "Care Home Analysis":
         with tab1:
             st.header("Usage Analysis")
             period = st.selectbox("Time Granularity", ["Daily", "Weekly", "Monthly", "Yearly"], index=2, key="usage_period")
-            usage_df = process_usage_data(df, care_home, beds, period)
+            with st.spinner("Preparing usage charts..."):
+                usage_df = process_usage_data(df, care_home, beds, period)
             st.plotly_chart(plot_usage_counts(usage_df, period), use_container_width=True, key="usage_counts")
             st.plotly_chart(plot_usage_per_bed(usage_df, period), use_container_width=True, key="usage_per_bed")
             if period == "Monthly":
                 from data_processor_simple import calculate_coverage_percentage
-                coverage_df = calculate_coverage_percentage(df[df['Care Home ID'] == care_home])
+                coverage_df = calculate_coverage_percentage(df[df['Care Home ID'].astype(str) == str(care_home)])
                 st.plotly_chart(plot_coverage(coverage_df), use_container_width=True, key="coverage")
             else:
                 st.info("Coverage % is only displayed in Monthly mode.")
@@ -258,7 +495,8 @@ elif step_title == "Care Home Analysis":
             st.header("Health Insights (Based on NEWS2)")
             period2 = st.selectbox("Time Granularity (Health Insights)", ["Daily", "Weekly", "Monthly", "Yearly"], index=2, key="health_period")
 
-            hi_data = process_health_insights(df, care_home, period2)
+            with st.spinner("Preparing NEWS2 insight charts..."):
+                hi_data = cached_health_insights(df, care_home, period2)
 
             if hi_data.get('news2_counts') is not None and not hi_data['news2_counts'].empty:
                 all_scores = sorted(hi_data['news2_counts'].columns)
@@ -295,7 +533,7 @@ elif step_title == "Care Home Analysis":
             st.plotly_chart(plot_high_score_params(hi_data, period2), use_container_width=True, key="high_score_params")
 
     else:
-        st.warning("Please complete Step 1 first by uploading data and entering analysis.")
+        render_need_data_actions()
 
 # Step 3: Batch Prediction (Offline)
 elif step_title == "Batch Prediction":
@@ -310,7 +548,12 @@ elif step_title == "Batch Prediction":
 
         with st.form("password_form"):
             password = st.text_input("Password", type="password")
-            submitted = st.form_submit_button("Authenticate")
+            submitted = st.form_submit_button(
+                "Authenticate",
+                type="primary",
+                icon=":material/login:",
+                use_container_width=True,
+            )
 
             if submitted:
                 if password == CORRECT_PASSWORD:
@@ -322,19 +565,32 @@ elif step_title == "Batch Prediction":
     def show_batch_prediction_page():
         """显示批量预测页面的实际内容"""
         # 在侧边栏添加一个登出/锁定按钮
-        st.sidebar.button("Lock Batch Prediction Page", on_click=lambda: st.session_state.update(batch_prediction_authenticated=False))
+        st.sidebar.button(
+            "Lock Batch Prediction Page",
+            icon=":material/lock:",
+            use_container_width=True,
+            on_click=lambda: st.session_state.update(batch_prediction_authenticated=False)
+        )
 
         if st.session_state['df'] is None:
-            st.warning("Please upload data in Step 1 before running predictions.")
+            render_need_data_actions()
         else:
+            render_dataset_status(st.session_state['df'])
             st.info("This step will run predictions for all care homes with sufficient data (>50 observations) and generate a downloadable CSV file.")
 
             st.subheader("Prediction Parameters")
-            min_obs = st.number_input("Minimum observations required per care home", min_value=1, value=50, step=10)
-            window_length = st.slider("Moving average window (months)", min_value=1, max_value=12, value=2)
-            sigma = st.slider("Prior belief variance (sigma)", min_value=0.1, max_value=2.0, value=0.5, step=0.1)
+            with st.form("batch_prediction_settings"):
+                min_obs = st.number_input("Minimum observations required per care home", min_value=1, value=50, step=10)
+                window_length = st.slider("Moving average window (months)", min_value=1, max_value=12, value=2)
+                sigma = st.slider("Prior belief variance (sigma)", min_value=0.1, max_value=2.0, value=0.5, step=0.1)
+                run_prediction = st.form_submit_button(
+                    "Start Batch Prediction",
+                    type="primary",
+                    use_container_width=True,
+                    icon=":material/play_arrow:",
+                )
 
-            if st.button("Start Batch Prediction"):
+            if run_prediction:
                 df = st.session_state['df']
                 obs_counts = df['Care Home ID'].value_counts()
                 valid_care_homes = obs_counts[obs_counts > min_obs].index.tolist()
@@ -379,6 +635,10 @@ elif step_title == "Batch Prediction":
                 data=csv,
                 file_name=f"batch_prediction_results_{pd.Timestamp.now().strftime('%Y%m%d')}.csv",
                 mime="text/csv",
+                type="primary",
+                icon=":material/download:",
+                use_container_width=True,
+                on_click="ignore",
             )
 
     # --- 主逻辑：根据认证状态显示密码表单或页面内容 ---
@@ -394,45 +654,48 @@ elif step_title == "Prediction Visualization":
     st.header("Step 4: Prediction Visualization")
 
     if st.session_state['df'] is None:
-        st.warning("Please upload the historical data in Step 1 to compare with predictions.")
+        render_need_data_actions()
     else:
+        render_dataset_status(st.session_state['df'])
         st.info("Upload the prediction results file (generated in Step 3) to visualize.")
         upload_pred_file = st.file_uploader(
             "Upload Prediction Results (.csv)",
             type=["csv"],
-            key="step4_upload"
+            key="step4_upload",
+            width="stretch",
         )
 
         if upload_pred_file and st.session_state['df'] is not None:
-            pred_df = pd.read_csv(upload_pred_file)
-            hist_df = st.session_state['df']
+            with st.spinner("Combining prediction and actual data..."):
+                pred_df = pd.read_csv(upload_pred_file)
+                hist_df = st.session_state['df'].copy()
 
-            hist_df['Date/Time'] = pd.to_datetime(hist_df['Date/Time'])
-            hist_df['Month'] = hist_df['Date/Time'].dt.strftime('%Y-%m')
+                hist_df['Date/Time'] = pd.to_datetime(hist_df['Date/Time'])
+                hist_df['Month'] = hist_df['Date/Time'].dt.strftime('%Y-%m')
 
-            if 'NEWS2 score' in hist_df.columns and 'NEWS2 Score' not in hist_df.columns:
-                hist_df.rename(columns={'NEWS2 score': 'NEWS2 Score'}, inplace=True)
+                if 'NEWS2 score' in hist_df.columns and 'NEWS2 Score' not in hist_df.columns:
+                    hist_df.rename(columns={'NEWS2 score': 'NEWS2 Score'}, inplace=True)
 
-            actual_counts = hist_df.groupby(['Care Home ID', 'Care Home Name', 'Month', 'NEWS2 Score']).size().reset_index(name='Actual')
+                actual_counts = hist_df.groupby(['Care Home ID', 'Care Home Name', 'Month', 'NEWS2 Score']).size().reset_index(name='Actual')
 
-            pred_df['Care Home ID'] = pred_df['Care Home ID'].astype(str)
-            pred_df['NEWS2 Score'] = pred_df['NEWS2 Score'].astype(int)
-            actual_counts['Care Home ID'] = actual_counts['Care Home ID'].astype(str)
-            actual_counts['NEWS2 Score'] = actual_counts['NEWS2 Score'].astype(int)
+                pred_df['Care Home ID'] = pred_df['Care Home ID'].astype(str)
+                pred_df['NEWS2 Score'] = pred_df['NEWS2 Score'].astype(int)
+                actual_counts['Care Home ID'] = actual_counts['Care Home ID'].astype(str)
+                actual_counts['NEWS2 Score'] = actual_counts['NEWS2 Score'].astype(int)
 
-            merged_df = pd.merge(
-                pred_df,
-                actual_counts,
-                how='left',
-                on=['Care Home ID', 'Care Home Name', 'Month', 'NEWS2 Score']
-            )
+                merged_df = pd.merge(
+                    pred_df,
+                    actual_counts,
+                    how='left',
+                    on=['Care Home ID', 'Care Home Name', 'Month', 'NEWS2 Score']
+                )
 
             merged_df['Care Home Display'] = merged_df['Care Home ID'].astype(str) + " | " + merged_df['Care Home Name'].astype(str)
 
             # --- 新增：护理院选择下拉菜单 ---
             st.subheader("Filter by Care Home")
-            all_care_homes_option = "All Care Homes"
-            care_home_options = [all_care_homes_option] + sorted(merged_df['Care Home Display'].unique())
+            all_care_homes_option = "All Care Homes (slower)"
+            care_home_options = sorted(merged_df['Care Home Display'].unique()) + [all_care_homes_option]
 
             selected_care_home = st.selectbox(
                 "Select a care home to view its specific data and charts:",
@@ -553,37 +816,19 @@ elif step_title == "Benchmark Grouping":
     st.header("Step 5: Overall Statistics & Benchmark Grouping")
 
     if st.session_state['df'] is None:
-        st.warning("Please upload data in Step 1 to begin this analysis.")
+        render_need_data_actions()
     else:
         df_full = st.session_state['df']
+        render_dataset_status(df_full)
 
         # --- 为箱线图和热力图准备月度数据 ---
-        df_copy = df_full.copy()
-        df_copy['Date/Time'] = pd.to_datetime(df_copy['Date/Time'])
-        df_copy['Month'] = df_copy['Date/Time'].dt.strftime('%Y-%m')
-        if 'No of Beds' not in df_copy.columns:
+        if 'No of Beds' not in df_full.columns:
             st.error("Source data must contain 'No of Beds' column for this analysis.")
             st.stop()
 
-        beds_info = df_copy.drop_duplicates(subset=['Care Home ID']).set_index('Care Home ID')['No of Beds']
-        monthly_counts = df_copy.groupby(['Care Home ID', 'Care Home Name', 'Month']).size().reset_index(name='Monthly Observations')
-        monthly_benchmark_df = pd.merge(monthly_counts, beds_info, on='Care Home ID')
-        monthly_benchmark_df = monthly_benchmark_df[monthly_benchmark_df['No of Beds'] > 0]
-        monthly_benchmark_df['Usage per Bed'] = monthly_benchmark_df['Monthly Observations'] / monthly_benchmark_df['No of Beds']
-        quartiles = monthly_benchmark_df.groupby('Month')['Usage per Bed'].quantile([0.25, 0.75]).unstack()
-        quartiles.columns = ['Q1', 'Q3']
-        monthly_benchmark_df = pd.merge(monthly_benchmark_df, quartiles, on='Month', how='left')
-        conditions = [
-            monthly_benchmark_df['Usage per Bed'] >= monthly_benchmark_df['Q3'],
-            monthly_benchmark_df['Usage per Bed'] <= monthly_benchmark_df['Q1']
-        ]
-        choices = ['High', 'Low']
-        monthly_benchmark_df['Group'] = np.select(conditions, choices, default='Medium')
-        group_map = {'Low': 0, 'Medium': 1, 'High': 2}
-        monthly_benchmark_df['Group Value'] = monthly_benchmark_df['Group'].map(group_map)
-
-        # --- 现在开始计算地理分布数据 ---
-        geospatial_df = calculate_benchmark_data(df_full)
+        with st.spinner("Preparing benchmark data..."):
+            monthly_benchmark_df = cached_monthly_benchmark_table(df_full)
+            geospatial_df = cached_benchmark_data(df_full)
 
         if monthly_benchmark_df.empty or geospatial_df.empty:
             st.info("Not enough data to generate benchmark statistics.")
@@ -697,8 +942,9 @@ elif step_title == "Benchmark Grouping":
                 # 定义抖动幅度 (约等于 +/- 200米)
                 jitter_amount = 0.002
                 # 创建带有随机抖动的新坐标列
-                geospatial_df['lat_jittered'] = geospatial_df['Latitude'] + np.random.uniform(-jitter_amount, jitter_amount, size=len(geospatial_df))
-                geospatial_df['lon_jittered'] = geospatial_df['Longitude'] + np.random.uniform(-jitter_amount, jitter_amount, size=len(geospatial_df))
+                rng = np.random.default_rng(42)
+                geospatial_df['lat_jittered'] = geospatial_df['Latitude'] + rng.uniform(-jitter_amount, jitter_amount, size=len(geospatial_df))
+                geospatial_df['lon_jittered'] = geospatial_df['Longitude'] + rng.uniform(-jitter_amount, jitter_amount, size=len(geospatial_df))
 
                 # 创建地图
                 fig_map = px.scatter_map(
@@ -744,6 +990,9 @@ elif step_title == "Benchmark Grouping":
                 data=csv,
                 file_name="care_home_pi_ranking.csv",
                 mime="text/csv",
+                icon=":material/download:",
+                use_container_width=True,
+                on_click="ignore",
             )
 
 # Step 6: Regional Analysis
@@ -752,14 +1001,16 @@ elif step_title == "Regional Analysis":
     st.header("Step 6: Regional Analysis")
 
     if st.session_state['df'] is None:
-        st.warning("Please upload data in Step 1 to begin this analysis.")
+        render_need_data_actions()
     else:
         df = st.session_state['df']
+        render_dataset_status(df)
 
         if 'Area' not in df.columns or 'No of Beds' not in df.columns:
             st.error("Source data must contain 'Area' and 'No of Beds' columns for this analysis.")
         else:
-            monthly_df_full = get_monthly_regional_benchmark_data(df)
+            with st.spinner("Preparing regional benchmark data..."):
+                monthly_df_full = cached_monthly_regional_data(df)
 
             if monthly_df_full.empty:
                 st.info("Not enough data to generate regional analysis.")
@@ -844,6 +1095,9 @@ elif step_title == "Regional Analysis":
                     data=csv,
                     file_name="regional_benchmark_summary.csv",
                     mime="text/csv",
+                    icon=":material/download:",
+                    use_container_width=True,
+                    on_click="ignore",
                 )
 
 # Step 7: Correlation Analysis
@@ -853,9 +1107,10 @@ elif step_title == "Correlation Analysis":
     st.markdown("Analysis of the correlation between monthly high NEWS scores (≥6) and average usage per bed.")
 
     if st.session_state['df'] is None:
-        st.warning("Please upload data in Step 1 to begin this analysis.")
+        render_need_data_actions()
     else:
         df = st.session_state['df']
+        render_dataset_status(df)
 
         if 'NEWS2 score' not in df.columns or 'No of Beds' not in df.columns:
             st.error("Source data must contain 'NEWS2 score' and 'No of Beds' columns for this analysis.")
@@ -872,7 +1127,7 @@ elif step_title == "Correlation Analysis":
             )
 
             with st.spinner("Calculating monthly data and correlations..."):
-                monthly_corr_df, corr_summary_df, overall_stats = calculate_correlation_data(df, min_months=min_months_for_corr)
+                monthly_corr_df, corr_summary_df, overall_stats = cached_correlation_data(df, min_months_for_corr)
 
             if corr_summary_df.empty:
                 st.info(f"Not enough data to generate correlation analysis. No care homes found with at least {min_months_for_corr} months of data.")
@@ -930,6 +1185,9 @@ elif step_title == "Correlation Analysis":
                     data=csv,
                     file_name="correlation_summary.csv",
                     mime="text/csv",
+                    icon=":material/download:",
+                    use_container_width=True,
+                    on_click="ignore",
                 )
 
                 st.markdown("---")
@@ -977,18 +1235,3 @@ elif step_title == "Correlation Analysis":
                         hovermode='x unified'
                     )
                     st.plotly_chart(beautify_line_chart(fig), use_container_width=True)
-
-st.markdown(
-    """
-    <style>
-    .stDataFrame tbody tr td {
-        font-size: 20px !important;
-    }
-    .stDataFrame thead tr th {
-        font-size: 20px !important;
-    }
-    </style>
-    """,
-    unsafe_allow_html=True
-)
-# Updated on Mon Oct 20 17:42:28 BST 2025
