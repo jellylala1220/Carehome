@@ -1,17 +1,41 @@
-    # Python
-    __pycache__/
-    *.pyc
-    *.pyo
-    *.pyd
-    
-    # Virtual Environment
-    .venv/
-    venv/
-    env/
-    
-    # IDE / Editor specific
-    .idea/
-    *.swp
-    
-    # OS specific
-    .DS_Store
+# Python runtime/cache files
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+.venv/
+.venv*/
+venv/
+env/
+
+# Streamlit/local app state
+.streamlit/secrets.toml
+
+# IDE/editor files
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+
+# Local Phase 2/raw data and private working material.
+# Keep these on disk, but do not push them to GitHub unless they are anonymised
+# and intentionally added with `git add -f`.
+Stage 2 THA&LU/
+phase2/raw/
+phase2/private/
+local_data/
+Doc/
+Patent_Figures/
+Streamlit Carehome Dashboard 2.0/
+scripts/build_patent_figure_pack.py
+
+# Generated analysis outputs
+analysis_charts/
+all_care_home_time_series/
+*.log
